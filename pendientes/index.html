@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Pendientes</title>
+<meta name="description" content="Tu libreta de cosas por hacer: apúntalas escribiendo o con la voz y táchalas.">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pendientes">
+<meta name="format-detection" content="telephone=no">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap">
+<link rel="stylesheet" href="styles.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+
+<header class="nav" id="nav">
+  <div class="nav-in">
+    <span class="nav-title" aria-hidden="true">Pendientes</span>
+    <div class="nav-btns">
+      <button class="round glass" id="searchBtn" type="button" aria-label="Buscar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.25"/><path d="M15.25 15.25 20 20"/></svg>
+      </button>
+      <button class="round glass" id="menuBtn" type="button" aria-label="Ajustes">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h8.5M17.5 7.5H20M4 16.5h2.5M11.5 16.5H20"/><circle cx="15" cy="7.5" r="2.5"/><circle cx="9" cy="16.5" r="2.5"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <div class="hero-txt">
+      <p class="date" id="today"></p>
+      <h1 id="bigTitle">Pendientes</h1>
+      <p class="summary" id="summary"></p>
+    </div>
+    <div class="ring" id="ring" hidden>
+      <svg viewBox="0 0 56 56" aria-hidden="true"><circle class="ring-bg" cx="28" cy="28" r="23"/><circle class="ring-fg" id="ringFg" cx="28" cy="28" r="23"/></svg>
+      <span class="ring-txt" id="ringTxt"></span>
+    </div>
+  </section>
+
+  <div class="search" id="searchBar" hidden>
+    <label class="search-field glass">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.25"/><path d="M15.25 15.25 20 20"/></svg>
+      <input id="search" type="search" placeholder="Buscar en todo" enterkeyhint="search" autocomplete="off">
+    </label>
+    <button class="bar-btn" type="button" id="searchCancel">Cancelar</button>
+  </div>
+
+  <aside class="install glass" id="installCard" hidden>
+    <img src="icons/icon-192.png" alt="" width="44" height="44">
+    <div class="install-txt">
+      <strong>Úsala a pantalla completa</strong>
+      <span>Instálala y desaparece la barra del navegador.</span>
+      <button class="pill" type="button" id="installBtn">Instalar</button>
+    </div>
+    <button class="x" type="button" id="installClose" aria-label="Ahora no">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>
+    </button>
+  </aside>
+
+  <div class="seg glass" role="tablist" aria-label="Filtrar" id="seg" data-active="todo">
+    <span class="seg-thumb" aria-hidden="true"></span>
+    <button type="button" role="tab" data-filter="todo" aria-selected="true">Por hacer <span class="count" id="countTodo"></span></button>
+    <button type="button" role="tab" data-filter="done" aria-selected="false">Hechas <span class="count" id="countDone"></span></button>
+  </div>
+
+  <div class="tags" id="tags" hidden></div>
+
+  <p class="tip" id="tip" hidden>
+    <span>Desliza <b>→</b> para tachar y <b>←</b> para pasar a mañana o borrar. Mantén pulsada una tarea para moverla.</span>
+    <button type="button" id="tipClose">Entendido</button>
+  </p>
+
+  <div class="empty" id="empty" hidden>
+    <div class="empty-ic glass" id="emptyIc"></div>
+    <h2 id="emptyTitle"></h2>
+    <p id="emptyText"></p>
+  </div>
+
+  <div id="sections" aria-live="polite"></div>
+
+  <button class="link-btn danger" id="clearDone" type="button" hidden>Borrar todas las hechas</button>
+</main>
+
+<form class="dock" id="composer" autocomplete="off">
+  <div class="hint" id="hint" hidden></div>
+  <div class="dock-in">
+    <label class="field glass">
+      <span class="sr">Nueva tarea</span>
+      <textarea id="input" rows="1" placeholder="Nueva tarea" enterkeyhint="send"></textarea>
+    </label>
+    <button class="action" id="action" type="submit" data-mode="voice" aria-label="Dictar tarea">
+      <svg class="i-mic" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.75" y="2.75" width="6.5" height="12" rx="3.25"/><path d="M5.25 11a6.75 6.75 0 0 0 13.5 0M12 17.75V21"/></svg>
+      <svg class="i-send" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19.5V5M5.75 11.25 12 5l6.25 6.25"/></svg>
+    </button>
+  </div>
+</form>
+
+<div class="rec" id="rec" hidden>
+  <div class="rec-panel" role="dialog" aria-modal="true" aria-labelledby="recTitle">
+    <span class="grabber" aria-hidden="true"></span>
+    <p class="rec-title" id="recTitle">Te escucho</p>
+    <p class="rec-live" id="recLive"></p>
+    <div class="wave" id="wave" aria-hidden="true"></div>
+    <button class="rec-btn" id="recStop" type="button" aria-label="Terminar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2.5"/></svg>
+    </button>
+    <p class="rec-hint" id="recHint">Di <b>«nueva tarea»</b> para separar varias · <b>«mañana»</b>, <b>«importante»</b> o <b>«todos los días»</b> al final</p>
+    <button class="link-btn" id="recCancel" type="button">Cancelar</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden>
+  <span id="toastMsg"></span>
+  <button type="button" id="toastUndo">Deshacer</button>
+</div>
+
+<dialog class="sheet" id="edit" aria-labelledby="editTitle">
+  <form id="editForm">
+    <div class="sheet-top">
+      <span class="grabber" aria-hidden="true"></span>
+      <div class="sheet-bar">
+        <button class="bar-btn" type="button" data-close>Cancelar</button>
+        <h2 id="editTitle">Tarea</h2>
+        <button class="bar-btn strong" type="submit">Listo</button>
+      </div>
+    </div>
+    <div class="sheet-body">
+      <div class="card">
+        <textarea class="edit-text" id="editText" rows="2" placeholder="Qué hay que hacer" aria-label="Tarea"></textarea>
+        <textarea class="edit-note" id="editNote" rows="2" placeholder="Notas: un teléfono, una dirección, un enlace…" aria-label="Notas"></textarea>
+      </div>
+      <div class="quick-row" id="editQuick" hidden></div>
+
+      <div class="card">
+        <div class="cell cell-col">
+          <div class="cell-line">
+            <span class="ico" style="--c: var(--red)"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.75" y="5" width="16.5" height="15.25" rx="3.25"/><path d="M3.75 9.75h16.5M8.25 3v4M15.75 3v4"/><path d="M8 13.75h.01M12 13.75h.01M16 13.75h.01M8 17h.01M12 17h.01" stroke-width="2.6"/></svg></span>
+            <span class="cell-label">Para cuándo</span>
+          </div>
+          <div class="chips" id="dueChips">
+            <button type="button" data-due="0">Hoy</button>
+            <button type="button" data-due="1">Mañana</button>
+            <label class="chip-date" id="dateChip"><span id="editDateLabel">Otro día</span><input type="date" id="editDate" aria-label="Elegir día"></label>
+          </div>
+        </div>
+        <label class="cell">
+          <span class="ico" style="--c: var(--indigo)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 11.5V10a4 4 0 0 1 4-4h11M16.5 3l3 3-3 3M19.5 12.5V14a4 4 0 0 1-4 4h-11M7.5 21l-3-3 3-3"/></svg></span>
+          <span class="cell-label">Repetir</span>
+          <span class="cell-value" id="editRepeatLabel">Nunca</span>
+          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6"/></svg>
+          <select class="cell-select" id="editRepeat" aria-label="Repetir">
+            <option value="">Nunca</option>
+            <option value="daily">Cada día</option>
+            <option value="weekdays">Entre semana (lunes a viernes)</option>
+            <option value="weekly">Cada semana</option>
+            <option value="monthly">Cada mes</option>
+          </select>
+        </label>
+        <label class="cell">
+          <span class="ico" style="--c: var(--orange)"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="fill" d="M12 3.6l2.6 5.2 5.8.9-4.2 4.1 1 5.7L12 16.8l-5.2 2.7 1-5.7-4.2-4.1 5.8-.9z"/></svg></span>
+          <span class="cell-label">Importante</span>
+          <input class="switch" type="checkbox" id="editStar" role="switch">
+        </label>
+      </div>
+      <p class="cell-note" id="editInfo"></p>
+
+      <div class="card">
+        <button class="cell danger" type="button" id="editDelete">
+          <span class="ico" style="--c: var(--red)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16M9.25 6.5V5A1.75 1.75 0 0 1 11 3.25h2A1.75 1.75 0 0 1 14.75 5v1.5M6 6.5l.85 12.2a2 2 0 0 0 2 1.8h6.3a2 2 0 0 0 2-1.8L18 6.5M10 10.5v6M14 10.5v6"/></svg></span>
+          <span class="cell-label">Eliminar tarea</span>
+        </button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet" id="menu" aria-labelledby="menuTitle">
+  <div class="sheet-top">
+    <span class="grabber" aria-hidden="true"></span>
+    <div class="sheet-bar">
+      <span></span>
+      <h2 id="menuTitle">Ajustes</h2>
+      <button class="bar-btn strong" type="button" data-close>Listo</button>
+    </div>
+  </div>
+  <div class="sheet-body">
+    <p class="cell-head">Al pulsar el micrófono</p>
+    <div class="seg seg-sm" id="voiceSeg" role="radiogroup" aria-label="Al pulsar el micrófono">
+      <span class="seg-thumb" aria-hidden="true"></span>
+      <button type="button" role="radio" data-voice="dictar">Dicta a texto</button>
+      <button type="button" role="radio" data-voice="audio">Graba un audio</button>
+    </div>
+    <p class="cell-note" id="voiceNote"></p>
+    <div class="card">
+      <button class="cell" type="button" data-act="testmic">
+        <span class="ico" style="--c: var(--red)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.75v2.5M7 7.75v8.5M10.5 4.5v15M14 8.25v7.5M17.5 6.25v11.5M21 10.25v3.5"/></svg></span>
+        <span class="cell-label">Probar el micrófono</span>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+
+    <p class="cell-head">Trucos</p>
+    <div class="card tricks">
+      <p><b>«mañana»</b>, <b>«el viernes»</b>… al principio o al final: se apunta para ese día.</p>
+      <p><b>«importante»</b> al final: sale arriba, en Importantes.</p>
+      <p><b>«todos los días»</b>, <b>«entre semana»</b>, <b>«cada semana»</b> o <b>«cada mes»</b>: vuelve a aparecer cuando la taches.</p>
+      <p><b>#trabajo</b>, <b>#casa</b>… en el texto: etiquetas para filtrar.</p>
+      <p>Al dictar, di <b>«nueva tarea»</b> para separar varias. Al escribir, una por línea.</p>
+      <p>Un teléfono o un enlace en el texto o en las notas: botón para llamar o abrirlo.</p>
+    </div>
+
+    <div class="card">
+      <button class="cell" type="button" data-act="install" hidden>
+        <span class="ico" style="--c: var(--purple)"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.25" y="2.75" width="11.5" height="18.5" rx="3"/><path d="M12 7v6.75M9.5 11.25 12 13.75l2.5-2.5M10.5 18h3"/></svg></span>
+        <span class="cell-label">Instalar en el móvil</span>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6"/></svg>
+      </button>
+      <button class="cell" type="button" data-act="share">
+        <span class="ico" style="--c: var(--accent)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14.5V3.5M8 7.25 12 3.25l4 4M7.5 10.5H7a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5.5a2 2 0 0 0-2-2h-.5"/></svg></span>
+        <span class="cell-label">Compartir lo pendiente</span>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6"/></svg>
+      </button>
+      <button class="cell" type="button" data-act="export">
+        <span class="ico" style="--c: var(--green)"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.25" y="4" width="17.5" height="4.75" rx="1.6"/><path d="M5 8.75V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.75M12 11.25v5.5M9.5 14.25 12 16.75l2.5-2.5"/></svg></span>
+        <span class="cell-label">Guardar copia de seguridad</span>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6"/></svg>
+      </button>
+      <button class="cell" type="button" data-act="import">
+        <span class="ico" style="--c: var(--orange)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9M4.5 4.5V9H9M12 8v4.25l2.75 1.75"/></svg></span>
+        <span class="cell-label">Recuperar una copia</span>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+    <p class="cell-note">Todo se guarda solo en este móvil, sin cuentas ni servidores. Guarda una copia de vez en cuando por si cambias de móvil.</p>
+
+    <div class="card">
+      <button class="cell danger" type="button" data-act="clear">
+        <span class="ico" style="--c: var(--red)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16M9.25 6.5V5A1.75 1.75 0 0 1 11 3.25h2A1.75 1.75 0 0 1 14.75 5v1.5M6 6.5l.85 12.2a2 2 0 0 0 2 1.8h6.3a2 2 0 0 0 2-1.8L18 6.5M10 10.5v6M14 10.5v6"/></svg></span>
+        <span class="cell-label">Borrar las hechas</span>
+      </button>
+    </div>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="installSheet" aria-labelledby="installTitle">
+  <div class="sheet-top">
+    <span class="grabber" aria-hidden="true"></span>
+    <div class="sheet-bar">
+      <span></span>
+      <h2 id="installTitle">Instalar</h2>
+      <button class="bar-btn strong" type="button" data-close>Listo</button>
+    </div>
+  </div>
+  <div class="sheet-body">
+    <div class="install-hero">
+      <img src="icons/icon-192.png" alt="" width="72" height="72">
+      <p>Instalada se abre como una app de verdad: a pantalla completa, <b>sin la barra del navegador</b> y también sin internet.</p>
+    </div>
+    <ol class="steps" id="installSteps"></ol>
+  </div>
+</dialog>
+</body>
+</html>
