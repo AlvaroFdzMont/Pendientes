@@ -4,7 +4,8 @@
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // Samsung Internet dice que sabe dictar, pero no devuelve nada: allí se graba audio
+  const SR = /SamsungBrowser/i.test(navigator.userAgent) ? null : (window.SpeechRecognition || window.webkitSpeechRecognition);
   const CAN_RECORD = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
   const SPLIT = /\s*\bnueva tarea\b[\s,.;:]*/i;
   const MAX_REC = 5 * 60; // segundos
@@ -22,12 +23,14 @@
     starF: '<svg class="star-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6l2.6 5.2 5.8.9-4.2 4.1 1 5.7L12 16.8l-5.2 2.7 1-5.7-4.2-4.1 5.8-.9z"/></svg>',
     play: '<svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
     pause: '<svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5.5" width="4" height="13" rx="1"/><rect x="13.5" y="5.5" width="4" height="13" rx="1"/></svg>',
-    done: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
-    undo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4.5 9.5 9 5M4.5 9.5H15a4.5 4.5 0 0 1 0 9h-3"/></svg>',
-    trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M9.5 7V4.75h5V7M6.5 7l.8 12.1a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg>',
-    later: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h12.5M12 6.5l5.5 5.5-5.5 5.5M20.5 5v14"/></svg>',
-    today: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H7.5M12 6.5 6.5 12l5.5 5.5M3.5 5v14"/></svg>',
-    cal: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14.5" rx="3"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/></svg>',
+    // tachar: una raya que cruza un renglón y acaba en check
+    done: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12h7.5M13 15.5l2.5 2.5 5-6"/><path d="M3.5 7h9M3.5 17h5" opacity=".55"/></svg>',
+    undo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14.5 4.5 10 9 5.5M4.5 10h10.25a4.75 4.75 0 0 1 0 9.5H12"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16M9.25 6.5V5A1.75 1.75 0 0 1 11 3.25h2A1.75 1.75 0 0 1 14.75 5v1.5M6 6.5l.85 12.2a2 2 0 0 0 2 1.8h6.3a2 2 0 0 0 2-1.8L18 6.5M10 10.5v6M14 10.5v6"/></svg>',
+    // mañana: amanecer · hoy: sol
+    later: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19h18M6.75 19a5.25 5.25 0 0 1 10.5 0M12 3.25v5.5M9.5 5.75 12 3.25l2.5 2.5M4 13.25l1.5.9M20 13.25l-1.5.9"/></svg>',
+    today: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.25"/><path d="M12 2.75v2.1M12 19.15v2.1M2.75 12h2.1M19.15 12h2.1M5.45 5.45l1.5 1.5M17.05 17.05l1.5 1.5M5.45 18.55l1.5-1.5M17.05 6.95l1.5-1.5"/></svg>',
+    cal: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.75" y="5" width="16.5" height="15.25" rx="3.25"/><path d="M3.75 9.75h16.5M8.25 3v4M15.75 3v4"/><path d="M8 13.75h.01M12 13.75h.01M16 13.75h.01M8 17h.01M12 17h.01" stroke-width="2.6"/></svg>',
     clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.25"/><path d="M12 7.5V12l3 2"/></svg>',
     repeat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 11.5V10a4 4 0 0 1 4-4h11M16.5 3l3 3-3 3M19.5 12.5V14a4 4 0 0 1-4 4h-11M7.5 21l-3-3 3-3"/></svg>',
     phone: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 3.5h2.6l1.5 4.2-2 1.4a11 11 0 0 0 6.2 6.2l1.4-2 4.2 1.5v2.6a2.1 2.1 0 0 1-2.3 2.1A16.5 16.5 0 0 1 4.5 5.8a2.1 2.1 0 0 1 2.1-2.3z"/></svg>',
@@ -35,9 +38,12 @@
     link: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2"/></svg>',
     mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg>',
     fold: '<svg class="fold" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
-    list: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 7h10M9.5 12h10M9.5 17h10"/><circle cx="5" cy="7" r="1.2"/><circle cx="5" cy="12" r="1.2"/><circle cx="5" cy="17" r="1.2"/></svg>',
-    party: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8 12.5l2.8 2.8L16.5 9.5"/></svg>',
-    tray: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13.5 6.5 5.5h11l2.5 8M4 13.5V18a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 18v-4.5M4 13.5h4.5a3.5 3.5 0 0 0 7 0H20"/></svg>',
+    // libreta de anillas con renglones
+    list: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5.25" y="3.25" width="14.5" height="17.5" rx="2.75"/><path d="M3.5 7.5h3.5M3.5 12h3.5M3.5 16.5h3.5M10.25 8.5h6M10.25 12h6M10.25 15.5h3.5"/></svg>',
+    // sello con check: todo hecho
+    party: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.9l2.2 1.6 2.7-.1.8 2.6 2.2 1.6-.9 2.6.9 2.6-2.2 1.6-.8 2.6-2.7-.1-2.2 1.6-2.2-1.6-2.7.1-.8-2.6-2.2-1.6.9-2.6-.9-2.6 2.2-1.6.8-2.6 2.7.1z"/><path d="M8.6 12.2l2.3 2.3 4.5-4.7"/></svg>',
+    // renglones tachados: aún no hay nada hecho
+    tray: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.75" y="3.75" width="16.5" height="16.5" rx="4"/><path d="M7.5 9h9M7.5 12.5h9M7.5 16h5" opacity=".45"/><path d="M6.5 9h11"/></svg>',
     search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.25"/><path d="M15.25 15.25 20 20"/></svg>',
     share: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14.5V3.5M7.75 7.75 12 3.5l4.25 4.25M7 11H6.5A1.5 1.5 0 0 0 5 12.5v6A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-6a1.5 1.5 0 0 0-1.5-1.5H17"/></svg>',
     plusbox: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/></svg>',
@@ -1008,18 +1014,52 @@
   }
 
   // ---------- Voz: dictado a texto ----------
-  function startDictation() {
+  // Explica por qué no se ha podido dictar, con el ajuste concreto a tocar
+  function voiceFail(error, gotAudio) {
+    if (error === 'not-allowed') {
+      if (IS_IOS) return 'Sin permiso de micrófono. Actívalo en Ajustes → Apps → Safari → Micrófono.';
+      return STANDALONE
+        ? 'Sin permiso de micrófono. Dáselo en Ajustes del móvil → Aplicaciones → Chrome → Permisos.'
+        : 'Sin permiso de micrófono. Toca el icono junto a la dirección y permite el micrófono.';
+    }
+    if (error === 'service-not-allowed' || error === 'language-not-supported') {
+      return IS_IOS ? 'El dictado está apagado. Actívalo en Ajustes → General → Teclado → Dictado.' : 'Este navegador no deja dictar. Ábrela en Chrome.';
+    }
+    if (error === 'no-audio' || (!gotAudio && !error)) {
+      return 'El micrófono no se ha encendido.' + (IS_IOS ? ' Revisa Ajustes → General → Teclado → Dictado.' : '');
+    }
+    return SR_ERR[error] || 'No te he entendido. Prueba otra vez.';
+  }
+
+  // Si el dictado falla, el aviso ofrece grabar un audio en su lugar
+  const recordInstead = () => (CAN_RECORD ? () => { setVoice('audio'); startRecording(); } : null);
+
+  function startDictation(test) {
     const r = new SR();
     r.lang = 'es-ES';
     r.interimResults = true;
-    r.continuous = true;
+    r.continuous = !IS_IOS; // en iPhone, el modo continuo a veces no devuelve nada
     r.maxAlternatives = 1;
 
     let heard = '';
     let error = '';
     let cancelled = false;
     let talkTimer = 0;
+    let gotAudio = false;
 
+    // Si en unos segundos el micrófono ni se ha encendido, algo lo está impidiendo
+    let ended = false;
+    const watchdog = setTimeout(() => {
+      if (gotAudio || heard) return;
+      error = 'no-audio';
+      try { r.abort(); } catch { /* nada */ }
+      setTimeout(() => r.onend(), 1500); // por si el navegador no avisa de que ha parado
+    }, 7000);
+
+    r.onaudiostart = () => {
+      gotAudio = true;
+      el.recTitle.textContent = test ? 'Prueba: di una frase' : 'Te escucho';
+    };
     r.onresult = (e) => {
       // Se reconstruye entero cada vez: algunos Android repiten la frase acumulada en cada resultado.
       const parts = [];
@@ -1044,24 +1084,89 @@
       clearTimeout(talkTimer);
       talkTimer = setTimeout(() => el.wave.classList.remove('talk'), 700);
     };
-    r.onerror = (e) => { error = e.error; };
+    r.onerror = (e) => { if (e.error !== 'aborted' || !error) error = e.error; };
     r.onend = () => {
+      if (ended) return;
+      ended = true;
+      clearTimeout(watchdog);
       clearTimeout(talkTimer);
       closeRec();
-      if (cancelled || error === 'aborted') return;
-      const texts = heard.split(SPLIT).map((s) => s.trim()).filter(Boolean);
-      if (texts.length) { addMany(texts); return; }
-      if (error === 'service-not-allowed' && CAN_RECORD) {
-        setVoice('audio');
-        toast('Aquí no se puede dictar: grabaré notas de voz.');
+      if (cancelled) return;
+      if (test) {
+        if (heard) toast('Funciona. He oído: «' + heard + '»');
+        else toast(voiceFail(error, gotAudio), recordInstead(), 'Grabar audio');
         return;
       }
-      toast(SR_ERR[error] || 'No te he entendido. Prueba otra vez.');
+      const texts = heard.split(SPLIT).map((s) => s.trim()).filter(Boolean);
+      if (texts.length) { addMany(texts); return; }
+      toast(voiceFail(error, gotAudio), recordInstead(), 'Grabar audio');
     };
 
-    try { r.start(); } catch { toast('No se ha podido usar el micrófono.'); return; }
-    session = { stop: () => r.stop(), cancel: () => { cancelled = true; r.abort(); } };
+    try {
+      r.start();
+    } catch {
+      clearTimeout(watchdog);
+      toast('No se ha podido encender el dictado.', recordInstead(), 'Grabar audio');
+      return;
+    }
+    session = {
+      stop: () => { r.stop(); setTimeout(() => r.onend(), 2500); },
+      cancel: () => { cancelled = true; r.abort(); setTimeout(() => r.onend(), 800); },
+    };
     openRec('dictar');
+    el.recTitle.textContent = 'Encendiendo el micrófono…';
+  }
+
+  // Ajustes → «Probar el micrófono»: dice si llega sonido y si el dictado entiende algo
+  async function testMic() {
+    if (voiceMode === 'dictar' && SR) { startDictation(true); return; }
+    if (!CAN_RECORD) { toast('Este navegador no deja usar el micrófono. Ábrela en Chrome o en Safari.'); return; }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      toast(voiceFail(e && e.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture', false));
+      return;
+    }
+    let ac;
+    let raf = 0;
+    let max = 0;
+    const t0 = Date.now();
+    const finish = () => {
+      if (!session) return;
+      cancelAnimationFrame(raf);
+      if (ac) ac.close().catch(() => {});
+      stream.getTracks().forEach((t) => t.stop());
+      closeRec();
+      toast(max > 0.12 ? 'El micrófono funciona bien.' : 'No llega sonido del micrófono. ¿Lo está usando otra app?');
+    };
+    try {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      const an = ac.createAnalyser();
+      an.fftSize = 512;
+      ac.createMediaStreamSource(stream).connect(an);
+      const data = new Uint8Array(an.fftSize);
+      const loop = () => {
+        raf = requestAnimationFrame(loop);
+        an.getByteTimeDomainData(data);
+        let sum = 0;
+        for (const v of data) sum += (v - 128) * (v - 128);
+        const lvl = Math.sqrt(sum / data.length) / 28;
+        max = Math.max(max, lvl);
+        pushLevel(lvl);
+        const left = Math.ceil(5 - (Date.now() - t0) / 1000);
+        el.recLive.textContent = left > 0 ? left + ' s' : '';
+        if (left <= 0) finish();
+      };
+      raf = requestAnimationFrame(loop);
+    } catch {
+      stream.getTracks().forEach((t) => t.stop());
+      toast('El micrófono responde, pero no se puede medir el sonido aquí.');
+      return;
+    }
+    session = { stop: finish, cancel: finish };
+    openRec('audio');
+    el.recTitle.textContent = 'Prueba: habla un momento';
   }
 
   // ---------- Voz: nota de audio ----------
@@ -1069,8 +1174,8 @@
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-    } catch {
-      toast('Da permiso al micrófono para grabar.');
+    } catch (e) {
+      toast(voiceFail(e && e.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture', false));
       return;
     }
     const type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg']
@@ -1203,15 +1308,17 @@
   let toastTimer = 0;
   let undoFn = null;
 
-  function toast(msg, undo) {
+  function toast(msg, action, label) {
     el.toastMsg.textContent = msg;
-    undoFn = undo || null;
-    el.toastUndo.hidden = !undo;
+    undoFn = action || null;
+    el.toastUndo.hidden = !action;
+    el.toastUndo.textContent = label || 'Deshacer';
+    el.toast.classList.toggle('is-long', msg.length > 38);
     el.toast.hidden = true;
     void el.toast.offsetWidth; // reinicia la animación
     el.toast.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(hideToast, undo ? 5000 : 3500);
+    toastTimer = setTimeout(hideToast, Math.max(action ? 5000 : 3500, msg.length * 75));
   }
   function hideToast() { el.toast.hidden = true; undoFn = null; }
 
@@ -1219,7 +1326,10 @@
   function openSheet(d) {
     d.classList.remove('is-closing');
     d.style.transform = '';
+    const body = $('.sheet-body', d);
     d.showModal();
+    body.scrollTop = 0;
+    $('.sheet-top', d).classList.remove('is-scrolled');
   }
 
   function closeSheet(d) {
@@ -1235,6 +1345,8 @@
       if (e.target === d || e.target.closest('[data-close]')) closeSheet(d);
     });
     const top = $('.sheet-top', d);
+    const body = $('.sheet-body', d);
+    body.addEventListener('scroll', () => top.classList.toggle('is-scrolled', body.scrollTop > 2), { passive: true });
     let y0 = null;
     let dy = 0;
     top.addEventListener('pointerdown', (e) => {
@@ -1552,6 +1664,7 @@
     else if (act === 'export') exportData();
     else if (act === 'clear') clearDone();
     else if (act === 'install') setTimeout(install, 280);
+    else if (act === 'testmic') testMic();
   });
   el.importFile.addEventListener('change', () => {
     const f = el.importFile.files && el.importFile.files[0];

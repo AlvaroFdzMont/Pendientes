@@ -1,6 +1,6 @@
 // Funciona sin conexión: sirve la app desde la caché y la actualiza por detrás.
 // Si cambias un archivo y quieres forzar la actualización, sube el número de versión.
-const CACHE = 'pendientes-v3';
+const CACHE = 'pendientes-v5';
 const FONTS = 'pendientes-fuentes';
 const ASSETS = [
   './',
