@@ -58,10 +58,14 @@ La primera vez que uses el micrófono el móvil pedirá permiso: acéptalo.
 
 ## Bueno saber
 
-- El **dictado** usa el reconocimiento de voz del navegador: en Android (Chrome) necesita internet. En iPhone funciona
-  en Safari; si instalada como app no te deja dictar, la app pasa sola a **grabar audio**.
+- El micrófono tiene dos modos (Ajustes):
+  - **Dictado**: escribe mientras hablas con el reconocimiento de voz del navegador. En Android necesita internet.
+  - **Grabar y transcribir**: grabas, paras y se apunta como texto (el audio no se guarda). Se pasa a texto en el
+    propio móvil con Whisper: la primera vez descarga unos 80 MB (mejor con wifi) y después funciona sin internet.
+    Tarda unos segundos por tarea. Si el reconocimiento fallara, la grabación se guarda como audio para no perderla.
+- Si algo del micrófono no va, **Ajustes → Probar el micrófono** dice qué pasa y qué ajuste tocar.
 - Los datos viven en el navegador de ese móvil. Si borras los datos de Chrome/Safari o cambias de móvil se pierden:
   usa **Ajustes → Guardar copia de seguridad** de vez en cuando.
 - No avisa con notificaciones a una hora: una web sin servidor no puede hacerlo de forma fiable con el móvil bloqueado.
 - Cuando cambies algún archivo y lo subas, la app se actualiza sola la siguiente vez que la abras (a veces hace falta
-  abrirla dos veces). Si no, sube el número de `CACHE` en `sw.js` (`pendientes-v3` → `pendientes-v4`).
+  abrirla dos veces). Si no, sube el número de `CACHE` en `sw.js` (`pendientes-v6` → `pendientes-v7`).

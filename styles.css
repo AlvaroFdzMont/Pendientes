@@ -886,6 +886,23 @@ button.group-h[aria-expanded="false"] .fold { transform: rotate(-90deg); }
 .rec-btn:active { transform: scale(.9); }
 .rec[data-mode="audio"] .rec-btn { background: var(--red); box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 20%, transparent), 0 10px 24px -6px color-mix(in srgb, var(--red) 70%, transparent); }
 .rec-btn svg { width: 28px; height: 28px; fill: currentColor; stroke: none; }
+/* Pasando a texto: el botón se vuelve un indicador que gira */
+.rec[data-mode="busy"] .rec-btn { pointer-events: none; color: var(--accent); background: var(--fill); box-shadow: none; }
+.rec[data-mode="busy"] .rec-btn svg,
+.rec[data-mode="busy"] .rec-btn::after { display: none; }
+.rec[data-mode="busy"] .rec-btn::before {
+  content: "";
+  position: absolute;
+  inset: 22px;
+  border-radius: 50%;
+  border: 3px solid currentColor;
+  border-right-color: transparent;
+  animation: lz-spin .8s linear infinite;
+}
+.rec[data-mode="busy"] .wave span { background: var(--accent); opacity: .5; }
+.rec[data-mode="busy"] .rec-live { font-size: 24px; }
+@keyframes lz-spin { to { transform: rotate(1turn); } }
+
 .rec-hint { margin: 16px auto 0; max-width: 340px; font-size: 13px; line-height: 1.45; color: var(--ink2); }
 .rec-hint b { color: var(--ink); font-weight: 600; }
 .rec .link-btn { margin-top: 4px; }

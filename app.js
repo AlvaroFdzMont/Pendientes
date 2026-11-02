@@ -8,7 +8,7 @@
   const SR = /SamsungBrowser/i.test(navigator.userAgent) ? null : (window.SpeechRecognition || window.webkitSpeechRecognition);
   const CAN_RECORD = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
   const SPLIT = /\s*\bnueva tarea\b[\s,.;:]*/i;
-  const MAX_REC = 5 * 60; // segundos
+  const MAX_REC = 2 * 60; // segundos: son tareas cortas
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const IS_IOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const STANDALONE = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -1094,19 +1094,19 @@
       if (cancelled) return;
       if (test) {
         if (heard) toast('Funciona. He oído: «' + heard + '»');
-        else toast(voiceFail(error, gotAudio), recordInstead(), 'Grabar audio');
+        else toast(voiceFail(error, gotAudio), recordInstead(), 'Grabar');
         return;
       }
       const texts = heard.split(SPLIT).map((s) => s.trim()).filter(Boolean);
       if (texts.length) { addMany(texts); return; }
-      toast(voiceFail(error, gotAudio), recordInstead(), 'Grabar audio');
+      toast(voiceFail(error, gotAudio), recordInstead(), 'Grabar');
     };
 
     try {
       r.start();
     } catch {
       clearTimeout(watchdog);
-      toast('No se ha podido encender el dictado.', recordInstead(), 'Grabar audio');
+      toast('No se ha podido encender el dictado.', recordInstead(), 'Grabar');
       return;
     }
     session = {
@@ -1166,10 +1166,86 @@
     }
     session = { stop: finish, cancel: finish };
     openRec('audio');
+    el.recHint.hidden = true;
     el.recTitle.textContent = 'Prueba: habla un momento';
   }
 
-  // ---------- Voz: nota de audio ----------
+  // ---------- Voz: pasar la grabación a texto en el propio móvil ----------
+  const STT_OK = typeof Worker !== 'undefined' && typeof WebAssembly === 'object';
+
+  const stt = (() => {
+    let w = null;
+    let seq = 0;
+    let ready = false;
+    const pending = new Map();
+    let onProgress = null;
+
+    function fail(message) {
+      for (const p of pending.values()) p.rej(new Error(message));
+      pending.clear();
+      if (w) w.terminate();
+      w = null;
+    }
+    function worker() {
+      if (w) return w;
+      w = new Worker('stt-worker.js', { type: 'module' });
+      w.onmessage = ({ data }) => {
+        if (data.type === 'progress') { if (onProgress) onProgress(data.pct); return; }
+        if (data.type === 'ready') { ready = true; prefs.set('sttReady', true); if (onProgress) onProgress(100); return; }
+        const p = pending.get(data.id);
+        if (!p) return;
+        pending.delete(data.id);
+        if (data.type === 'result') p.res(data.text);
+        else p.rej(new Error(data.message));
+      };
+      w.onerror = (e) => { e.preventDefault(); fail('No se ha podido cargar el reconocimiento de voz.'); };
+      return w;
+    }
+    return {
+      warm() { if (STT_OK && !ready) { try { worker().postMessage({ type: 'load' }); } catch { /* nada */ } } },
+      transcribe(pcm, language) {
+        return new Promise((res, rej) => {
+          const id = ++seq;
+          pending.set(id, { res, rej });
+          try { worker().postMessage({ type: 'transcribe', id, audio: pcm, language }, [pcm.buffer]); } catch (e) { pending.delete(id); rej(e); }
+        });
+      },
+      progress(fn) { onProgress = fn; },
+      get ready() { return ready; },
+    };
+  })();
+
+  // El audio grabado (webm u mp4) a 16 kHz mono, que es lo que entiende el reconocimiento
+  async function toPcm16k(blob) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC();
+    try {
+      const buf = await blob.arrayBuffer();
+      const audio = await new Promise((res, rej) => ac.decodeAudioData(buf, res, rej));
+      const ch = audio.numberOfChannels;
+      const src = audio.getChannelData(0);
+      const mono = ch === 1 ? src : src.map((v, i) => { let s = 0; for (let c = 0; c < ch; c++) s += audio.getChannelData(c)[i]; return s / ch; });
+      const ratio = audio.sampleRate / 16000;
+      const out = new Float32Array(Math.floor(mono.length / ratio));
+      for (let i = 0; i < out.length; i++) {
+        const x = i * ratio;
+        const j = Math.floor(x);
+        out[i] = mono[j] + ((mono[j + 1] ?? mono[j]) - mono[j]) * (x - j);
+      }
+      return out;
+    } finally {
+      ac.close().catch(() => {});
+    }
+  }
+
+  // Whisper, con silencio, a veces «oye» frases de subtítulos que nadie ha dicho
+  function cleanTranscript(text) {
+    const t = text.replace(/^[\s"«“'.,…-]+|[\s"»”'…-]+$/g, '').trim();
+    if (!t || /amara\.org|subtítulos|suscríbete|gracias por ver|¡?gracias\.?$/i.test(t)) return '';
+    return t;
+  }
+
+  // ---------- Voz: grabar y pasar a texto ----------
   async function startRecording() {
     let stream;
     try {
@@ -1221,26 +1297,79 @@
       cancelAnimationFrame(raf);
       if (ac) ac.close().catch(() => {});
       stream.getTracks().forEach((t) => t.stop());
-      closeRec();
-      if (cancelled || !chunks.length) return;
+      if (cancelled || !chunks.length) { closeRec(); return; }
       const dur = Math.round((Date.now() - t0) / 1000);
-      if (dur < 1) { toast('Demasiado corta. Graba un poco más.'); return; }
+      if (dur < 1) { closeRec(); toast('Demasiado corta. Graba un poco más.'); return; }
       const blob = new Blob(chunks, { type: mr.mimeType || type || 'audio/webm' });
-      const id = uid();
-      await db.putAudio(id, { buf: await blob.arrayBuffer(), type: blob.type });
-      const t = { id, text: 'Nota de voz', note: '', done: false, doneAt: null, star: false, created: Date.now(), order: maxOrder() + 1, due: null, repeat: null, audio: true, dur };
-      tasks.push(t);
-      fresh.add(id);
-      await db.put(t);
-      showTab('todo');
-      render();
-      toast('Nota guardada · tócala para ponerle nombre', async () => { await removeQuiet(id); render(); });
+
+      if (STT_OK) {
+        const text = await transcribeBlob(blob);
+        if (text === null) return; // cancelado mientras se pasaba a texto
+        if (text === '') { closeRec(); return; } // no se dijo nada que entender
+        if (text) {
+          closeRec();
+          addMany(text.split(SPLIT).map((s) => s.trim()).filter(Boolean));
+          return;
+        }
+        // false: falló el reconocimiento → se guarda el audio para no perder la tarea
+      }
+      closeRec();
+      await saveAudioNote(blob, dur);
     };
 
     mr.start(1000);
     session = { stop: () => mr.state !== 'inactive' && mr.stop(), cancel: () => { cancelled = true; if (mr.state !== 'inactive') mr.stop(); } };
     openRec('audio');
     tick();
+    stt.warm(); // empieza a cargar el reconocimiento mientras hablas
+  }
+
+  // Muestra «Pasando a texto…» (y la descarga, la primera vez). Devuelve el texto, '' si no se entendió nada,
+  // null si se canceló y false si el reconocimiento falló
+  async function transcribeBlob(blob) {
+    let cancelled = false;
+    session = { stop: () => {}, cancel: () => { cancelled = true; closeRec(); } };
+    el.rec.dataset.mode = 'busy';
+    el.recTitle.textContent = 'Pasando a texto…';
+    el.recLive.textContent = '';
+    el.recLive.dataset.placeholder = 'Un momento';
+    el.recHint.hidden = false;
+    el.recHint.textContent = stt.ready || prefs.get('sttReady', false) ? 'Se hace en el propio móvil, sin internet.' : 'Preparando el reconocimiento de voz…';
+    stt.progress((pct) => {
+      if (pct < 100) el.recHint.textContent = 'Descargando el reconocimiento de voz (solo la primera vez): ' + pct + ' %';
+      else el.recHint.textContent = 'Se hace en el propio móvil, sin internet.';
+    });
+    el.wave.classList.add('idle');
+    try {
+      const pcm = await toPcm16k(blob);
+      const raw = await stt.transcribe(pcm);
+      if (cancelled) return null;
+      const text = cleanTranscript(raw);
+      if (!text) toast('No he entendido nada en la grabación. Prueba a hablar más cerca.');
+      return text || (cancelled ? null : '');
+    } catch {
+      if (cancelled) return null;
+      closeRec();
+      toast(navigator.onLine === false && !prefs.get('sttReady', false)
+        ? 'Sin internet no puedo descargar el reconocimiento la primera vez: la guardo como audio.'
+        : 'No he podido pasarlo a texto: la guardo como audio.');
+      return false;
+    } finally {
+      stt.progress(null);
+      el.recHint.innerHTML = 'Di <b>«nueva tarea»</b> para separar varias · <b>«mañana»</b>, <b>«importante»</b> o <b>«todos los días»</b> al final';
+    }
+  }
+
+  async function saveAudioNote(blob, dur) {
+    const id = uid();
+    await db.putAudio(id, { buf: await blob.arrayBuffer(), type: blob.type });
+    const t = { id, text: 'Nota de voz', note: '', done: false, doneAt: null, star: false, created: Date.now(), order: maxOrder() + 1, due: null, repeat: null, audio: true, dur };
+    tasks.push(t);
+    fresh.add(id);
+    await db.put(t);
+    showTab('todo');
+    render();
+    if (el.toast.hidden) toast('Nota guardada · tócala para ponerle nombre', async () => { await removeQuiet(id); render(); });
   }
 
   function startVoice() {
@@ -1252,10 +1381,10 @@
 
   function openRec(mode) {
     el.rec.dataset.mode = mode;
-    el.recTitle.textContent = mode === 'dictar' ? 'Te escucho' : 'Grabando nota de voz';
+    el.recTitle.textContent = mode === 'dictar' ? 'Te escucho' : 'Grabando · toca para terminar';
     el.recLive.textContent = '';
     el.recLive.dataset.placeholder = mode === 'dictar' ? 'Di lo que tengas pendiente…' : '0:00';
-    el.recHint.hidden = mode !== 'dictar';
+    el.recHint.hidden = false; // «mañana», «importante»… valen también al grabar
     resetWave();
     el.wave.classList.toggle('idle', mode === 'dictar');
     el.input.blur();
@@ -1468,10 +1597,10 @@
     el.voiceNote.textContent = !SR && !CAN_RECORD
       ? 'Este navegador no deja usar el micrófono. Ábrela en Chrome (Android) o Safari (iPhone).'
       : !SR
-        ? 'Este navegador no dicta a texto: el micrófono graba notas de voz.'
+        ? 'Este navegador no dicta al momento: graba y lo pasa a texto en el propio móvil.'
         : voiceMode === 'dictar'
-          ? 'Lo que digas se convierte en texto y se apunta solo. En Android necesita internet.'
-          : 'Guarda el audio tal cual, también sin internet. Luego puedes ponerle nombre.';
+          ? 'Escribe mientras hablas, con el reconocimiento del móvil. En Android necesita internet. Si no te funciona, prueba «Grabar y transcribir».'
+          : 'Grabas, paras y se apunta como texto. Se hace en el propio móvil, también sin internet; la primera vez descarga unos 80 MB (mejor con wifi).';
     $('[data-act="install"]', el.menu).hidden = STANDALONE;
   }
 

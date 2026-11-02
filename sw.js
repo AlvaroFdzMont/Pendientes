@@ -1,27 +1,33 @@
 // Funciona sin conexión: sirve la app desde la caché y la actualiza por detrás.
 // Si cambias un archivo y quieres forzar la actualización, sube el número de versión.
-const CACHE = 'pendientes-v5';
-const FONTS = 'pendientes-fuentes';
+const CACHE = 'pendientes-v6';
+// Tipografía y motor del reconocimiento de voz (de otros servidores): se guardan la primera vez
+const EXT = 'pendientes-externos';
 const ASSETS = [
   './',
   'index.html',
   'styles.css',
   'app.js',
+  'stt-worker.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/apple-touch-icon.png',
 ];
+const EXT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
+  // Solo se borran las cachés antiguas de la propia app: el modelo de voz (transformers-cache) se conserva
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== FONTS).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys
+        .filter((k) => k.startsWith('pendientes-') && k !== CACHE && k !== EXT)
+        .map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -31,10 +37,9 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // Tipografía de Google Fonts: se guarda la primera vez y luego va sin internet
-  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
+  if (EXT_HOSTS.includes(url.hostname)) {
     e.respondWith((async () => {
-      const cache = await caches.open(FONTS);
+      const cache = await caches.open(EXT);
       const cached = await cache.match(req);
       if (cached) return cached;
       const res = await fetch(req);
