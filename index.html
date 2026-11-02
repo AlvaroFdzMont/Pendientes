@@ -5,9 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Pendientes</title>
 <meta name="description" content="Tu libreta de cosas por hacer: apúntalas escribiendo o con la voz y táchalas.">
+<meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
-<link rel="manifest" href="manifest.webmanifest">
+<link rel="manifest" id="manifest" href="manifest.webmanifest">
+<script>
+  // Android pinta las barras del sistema (hora arriba, botones abajo) con el color del manifiesto:
+  // en modo oscuro se usa el oscuro para que no salgan franjas claras.
+  (function () {
+    var m = window.matchMedia('(prefers-color-scheme: dark)');
+    var set = function () { document.getElementById('manifest').href = m.matches ? 'manifest-dark.webmanifest' : 'manifest.webmanifest'; };
+    set();
+    if (m.addEventListener) m.addEventListener('change', set);
+  })();
+</script>
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -95,17 +106,37 @@
   <button class="link-btn danger" id="clearDone" type="button" hidden>Borrar todas las hechas</button>
 </main>
 
-<form class="dock" id="composer" autocomplete="off">
+<form class="dock" id="composer" autocomplete="off" data-state="idle">
+  <div class="live glass" id="live" hidden>
+    <p class="live-text" id="liveText"></p>
+    <p class="live-hint">Di <b>«nueva tarea»</b> para separar varias · <b>«mañana»</b> o <b>«importante»</b> al final</p>
+  </div>
   <div class="hint" id="hint" hidden></div>
   <div class="dock-in">
     <label class="field glass">
       <span class="sr">Nueva tarea</span>
       <textarea id="input" rows="1" placeholder="Nueva tarea" enterkeyhint="send"></textarea>
     </label>
-    <button class="action" id="action" type="submit" data-mode="voice" aria-label="Dictar tarea">
-      <svg class="i-mic" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.75" y="2.75" width="6.5" height="12" rx="3.25"/><path d="M5.25 11a6.75 6.75 0 0 0 13.5 0M12 17.75V21"/></svg>
-      <svg class="i-send" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19.5V5M5.75 11.25 12 5l6.25 6.25"/></svg>
-    </button>
+    <div class="recbar glass" id="recbar" aria-live="polite">
+      <button class="rb-trash" id="rbTrash" type="button" aria-label="Descartar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16M9.25 6.5V5A1.75 1.75 0 0 1 11 3.25h2A1.75 1.75 0 0 1 14.75 5v1.5M6 6.5l.85 12.2a2 2 0 0 0 2 1.8h6.3a2 2 0 0 0 2-1.8L18 6.5M10 10.5v6M14 10.5v6"/></svg>
+      </button>
+      <span class="rb-dot" aria-hidden="true"></span>
+      <span class="rb-time" id="rbTime">0:00</span>
+      <span class="rb-slide" id="rbSlide"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6l-6 6 6 6"/></svg>Desliza para cancelar</span>
+      <span class="rb-wave" id="rbWave" aria-hidden="true"></span>
+      <span class="rb-busy"><i class="rb-spin" aria-hidden="true"></i><span id="rbBusyText">Pasando a texto…</span></span>
+    </div>
+    <div class="action-wrap">
+      <span class="lock glass" id="lock" aria-hidden="true">
+        <svg class="lock-pad" viewBox="0 0 24 24"><rect x="5.5" y="10.5" width="13" height="10" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>
+        <svg class="lock-up" viewBox="0 0 24 24"><path d="M6.5 14.5 12 9l5.5 5.5"/></svg>
+      </span>
+      <button class="action" id="action" type="button" data-mode="voice" aria-label="Mantén pulsado para hablar">
+        <svg class="i-mic" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.75" y="2.75" width="6.5" height="12" rx="3.25"/><path d="M5.25 11a6.75 6.75 0 0 0 13.5 0M12 17.75V21"/></svg>
+        <svg class="i-send" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19.5V5M5.75 11.25 12 5l6.25 6.25"/></svg>
+      </button>
+    </div>
   </div>
 </form>
 

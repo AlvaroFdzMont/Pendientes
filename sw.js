@@ -1,6 +1,6 @@
 // Funciona sin conexión: sirve la app desde la caché y la actualiza por detrás.
 // Si cambias un archivo y quieres forzar la actualización, sube el número de versión.
-const CACHE = 'pendientes-v6';
+const CACHE = 'pendientes-v7';
 // Tipografía y motor del reconocimiento de voz (de otros servidores): se guardan la primera vez
 const EXT = 'pendientes-externos';
 const ASSETS = [
@@ -10,6 +10,7 @@ const ASSETS = [
   'app.js',
   'stt-worker.js',
   'manifest.webmanifest',
+  'manifest-dark.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',

@@ -949,11 +949,15 @@
 
   // ---------- Escribir ----------
   function syncAction() {
+    const state = el.composer.dataset.state || 'idle';
     const hasText = el.input.value.trim().length > 0;
-    const mode = hasText || !voiceMode ? 'send' : 'voice';
+    let mode;
+    if (state === 'locked') mode = 'send';
+    else if (state !== 'idle') mode = 'voice';
+    else mode = hasText || !voiceMode ? 'send' : 'voice';
     el.action.dataset.mode = mode;
-    el.action.disabled = mode === 'send' && !hasText;
-    el.action.setAttribute('aria-label', mode === 'send' ? 'Apuntar' : voiceMode === 'audio' ? 'Grabar nota de voz' : 'Dictar tarea');
+    el.action.disabled = state === 'busy' || (state === 'idle' && mode === 'send' && !hasText);
+    el.action.setAttribute('aria-label', mode === 'send' ? 'Apuntar' : 'Mantén pulsado para hablar; un toque, manos libres');
     syncHint();
   }
 
@@ -989,31 +993,67 @@
   }
 
   // ---------- Onda de la voz ----------
-  const bars = [];
-  for (let i = 0; i < BARS; i++) {
-    const b = document.createElement('span');
-    b.style.setProperty('--i', String(i));
-    el.wave.append(b);
-    bars.push(b);
-  }
-  const levels = new Array(BARS).fill(0.08);
-
-  function pushLevel(v) {
-    levels.shift();
-    levels.push(Math.max(0.08, Math.min(1, v)));
-    // simétrica desde el centro, como la de Notas de voz
-    for (let i = 0; i < BARS; i++) {
-      const k = Math.abs(i - (BARS - 1) / 2) / (BARS / 2);
-      const src = levels[BARS - 1 - Math.floor(k * (BARS - 1) * 0.5)];
-      bars[i].style.transform = 'scaleY(' + (src * (1 - k * 0.45)).toFixed(3) + ')';
+  // Barras simétricas desde el centro, como las de Notas de voz: una en la barra de abajo y otra en la prueba
+  function makeWave(box, n) {
+    const bars = [];
+    for (let i = 0; i < n; i++) {
+      const b = document.createElement('span');
+      b.style.setProperty('--i', String(i));
+      box.append(b);
+      bars.push(b);
     }
+    const levels = new Array(n).fill(0.08);
+    return {
+      push(v) {
+        levels.shift();
+        levels.push(Math.max(0.08, Math.min(1, v)));
+        for (let i = 0; i < n; i++) {
+          const k = Math.abs(i - (n - 1) / 2) / (n / 2);
+          const src = levels[n - 1 - Math.floor(k * (n - 1) * 0.5)];
+          bars[i].style.transform = 'scaleY(' + (src * (1 - k * 0.45)).toFixed(3) + ')';
+        }
+      },
+      reset() {
+        levels.fill(0.08);
+        for (const b of bars) b.style.transform = '';
+      },
+    };
   }
-  function resetWave() {
-    levels.fill(0.08);
-    for (const b of bars) b.style.transform = '';
+  const testWave = makeWave(el.wave, BARS);
+  const dockWave = makeWave($('#rbWave'), 26);
+
+  // Nivel del micrófono de una grabación, para mover una onda
+  function meter(stream, wave) {
+    let ac = null;
+    let raf = 0;
+    let max = 0;
+    try {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      const an = ac.createAnalyser();
+      an.fftSize = 512;
+      ac.createMediaStreamSource(stream).connect(an);
+      const data = new Uint8Array(an.fftSize);
+      let last = 0;
+      const loop = (now) => {
+        raf = requestAnimationFrame(loop);
+        if (now - last < 55) return;
+        last = now;
+        an.getByteTimeDomainData(data);
+        let sum = 0;
+        for (const v of data) sum += (v - 128) * (v - 128);
+        const lvl = Math.sqrt(sum / data.length) / 28;
+        max = Math.max(max, lvl);
+        wave.push(lvl);
+      };
+      raf = requestAnimationFrame(loop);
+    } catch { /* sin onda */ }
+    return {
+      get max() { return max; },
+      stop() { cancelAnimationFrame(raf); if (ac) ac.close().catch(() => {}); },
+    };
   }
 
-  // ---------- Voz: dictado a texto ----------
+  // ---------- Voz: mensajes de error ----------
   // Explica por qué no se ha podido dictar, con el ajuste concreto a tocar
   function voiceFail(error, gotAudio) {
     if (error === 'not-allowed') {
@@ -1031,90 +1071,182 @@
     return SR_ERR[error] || 'No te he entendido. Prueba otra vez.';
   }
 
-  // Si el dictado falla, el aviso ofrece grabar un audio en su lugar
-  const recordInstead = () => (CAN_RECORD ? () => { setVoice('audio'); startRecording(); } : null);
+  // Si el dictado falla, el aviso ofrece grabar y transcribir en su lugar
+  const recordInstead = () => (CAN_RECORD ? () => { setVoice('audio'); startVoice(true); } : null);
+
+  // ---------- Barra de voz, como las notas de voz de WhatsApp ----------
+  // Mantener pulsado = grabar y, al soltar, apuntar · deslizar ← = descartar · deslizar ↑ = bloquear (manos libres)
+  // y luego tocar la flecha para apuntar · un toque corto también la deja bloqueada.
+  const rb = {
+    time: $('#rbTime'), busy: $('#rbBusyText'),
+    live: $('#live'), liveText: $('#liveText'),
+  };
+  let voiceT0 = 0;
+  let voiceTimer = 0;
+  let press = null;
+
+  function dockState(state) {
+    el.composer.dataset.state = state;
+    syncAction();
+  }
+
+  function resetActionPos() {
+    el.action.style.transform = '';
+    el.composer.style.removeProperty('--slide');
+    el.composer.style.removeProperty('--lift');
+  }
+
+  function voiceStarted(kind) {
+    el.composer.dataset.kind = kind;
+    el.input.blur();
+    voiceT0 = Date.now();
+    rb.time.textContent = '0:00';
+    clearInterval(voiceTimer);
+    voiceTimer = setInterval(() => {
+      const sec = (Date.now() - voiceT0) / 1000;
+      rb.time.textContent = fmtDur(sec);
+      if (sec >= MAX_REC && session && session.finish) session.finish();
+    }, 250);
+    dockWave.reset();
+    rb.live.hidden = kind !== 'dictar';
+    rb.liveText.textContent = '';
+    dockState(session && session.locked ? 'locked' : 'hold');
+  }
+
+  function voiceEnded() {
+    clearInterval(voiceTimer);
+    session = null;
+    press = null;
+    resetActionPos();
+    rb.live.hidden = true;
+    dockWave.reset();
+    dockState('idle');
+  }
+
+  function lockVoice() {
+    if (!session || session.locked) return;
+    session.locked = true;
+    resetActionPos();
+    vibrate(15);
+    dockState('locked');
+    if (!prefs.get('tipLock', false)) {
+      prefs.set('tipLock', true);
+      toast('Habla tranquilo y toca la flecha para apuntarla. La papelera la descarta.');
+    }
+  }
+
+  function startVoice(locked) {
+    if (session) return;
+    stopPlayback();
+    if (voiceMode === 'dictar') startDictation();
+    else if (voiceMode === 'audio') startRecording();
+    if (locked && session) lockVoice();
+  }
+
+  // ---------- Voz: dictado a texto ----------
+  // Errores con los que no tiene sentido volver a encender el reconocimiento
+  const FATAL = ['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported', 'network', 'no-audio'];
 
   function startDictation(test) {
-    const r = new SR();
-    r.lang = 'es-ES';
-    r.interimResults = true;
-    r.continuous = !IS_IOS; // en iPhone, el modo continuo a veces no devuelve nada
-    r.maxAlternatives = 1;
-
+    let committed = '';
     let heard = '';
     let error = '';
-    let cancelled = false;
-    let talkTimer = 0;
     let gotAudio = false;
-
-    // Si en unos segundos el micrófono ni se ha encendido, algo lo está impidiendo
+    let finishing = false;
+    let cancelled = false;
     let ended = false;
-    const watchdog = setTimeout(() => {
-      if (gotAudio || heard) return;
-      error = 'no-audio';
-      try { r.abort(); } catch { /* nada */ }
-      setTimeout(() => r.onend(), 1500); // por si el navegador no avisa de que ha parado
-    }, 7000);
+    let r = null;
+    const text = () => (committed + ' ' + heard).replace(/\s+/g, ' ').trim();
 
-    r.onaudiostart = () => {
-      gotAudio = true;
-      el.recTitle.textContent = test ? 'Prueba: di una frase' : 'Te escucho';
-    };
-    r.onresult = (e) => {
-      // Se reconstruye entero cada vez: algunos Android repiten la frase acumulada en cada resultado.
-      const parts = [];
-      let interim = '';
-      for (const res of e.results) {
-        const s = res[0].transcript.trim();
-        if (!s) continue;
-        const last = parts[parts.length - 1];
-        if (last && s.toLowerCase().startsWith(last.toLowerCase())) parts[parts.length - 1] = s;
-        else parts.push(s);
-        if (!res.isFinal) interim = s;
-      }
-      heard = parts.join(' ');
-      const fixed = interim ? heard.slice(0, heard.length - interim.length) : heard;
-      el.recLive.textContent = fixed;
+    const showLive = (interim) => {
+      const all = text();
+      rb.liveText.textContent = interim ? all.slice(0, all.length - interim.length) : all;
       if (interim) {
         const i = document.createElement('i');
         i.textContent = interim;
-        el.recLive.append(i);
+        rb.liveText.append(i);
       }
-      el.wave.classList.add('talk');
-      clearTimeout(talkTimer);
-      talkTimer = setTimeout(() => el.wave.classList.remove('talk'), 700);
+      rb.liveText.scrollTop = rb.liveText.scrollHeight;
     };
-    r.onerror = (e) => { if (e.error !== 'aborted' || !error) error = e.error; };
-    r.onend = () => {
+
+    const done = () => {
       if (ended) return;
       ended = true;
       clearTimeout(watchdog);
-      clearTimeout(talkTimer);
-      closeRec();
+      voiceEnded();
       if (cancelled) return;
+      const t = text();
       if (test) {
-        if (heard) toast('Funciona. He oído: «' + heard + '»');
+        if (t) toast('Funciona. He oído: «' + t + '»');
         else toast(voiceFail(error, gotAudio), recordInstead(), 'Grabar');
         return;
       }
-      const texts = heard.split(SPLIT).map((s) => s.trim()).filter(Boolean);
-      if (texts.length) { addMany(texts); return; }
-      toast(voiceFail(error, gotAudio), recordInstead(), 'Grabar');
+      const texts = t.split(SPLIT).map((x) => x.trim()).filter(Boolean);
+      if (texts.length) addMany(texts);
+      else toast(voiceFail(error, gotAudio), recordInstead(), 'Grabar');
     };
 
-    try {
+    // El reconocimiento del móvil se para solo cuando te callas: mientras no termines tú, se vuelve a encender
+    const begin = () => {
+      r = new SR();
+      r.lang = 'es-ES';
+      r.interimResults = true;
+      r.continuous = !IS_IOS; // en iPhone, el modo continuo a veces no devuelve nada
+      r.maxAlternatives = 1;
+      r.onaudiostart = () => { gotAudio = true; };
+      r.onresult = (e) => {
+        // Se reconstruye entero cada vez: algunos Android repiten la frase acumulada en cada resultado.
+        const parts = [];
+        let interim = '';
+        for (const res of e.results) {
+          const s = res[0].transcript.trim();
+          if (!s) continue;
+          const last = parts[parts.length - 1];
+          if (last && s.toLowerCase().startsWith(last.toLowerCase())) parts[parts.length - 1] = s;
+          else parts.push(s);
+          if (!res.isFinal) interim = s;
+        }
+        heard = parts.join(' ');
+        showLive(interim);
+      };
+      r.onerror = (e) => { if (e.error !== 'aborted' && e.error !== 'no-speech') error = e.error; };
+      r.onend = () => {
+        if (ended) return;
+        if (!finishing && !cancelled && !FATAL.includes(error) && session === s) {
+          committed = text();
+          heard = '';
+          try { begin(); return; } catch { /* no se puede volver a encender: se apunta lo que haya */ }
+        }
+        done();
+      };
       r.start();
+    };
+
+    // Si en unos segundos el micrófono ni se ha encendido, algo lo está impidiendo
+    const watchdog = setTimeout(() => {
+      if (gotAudio || text()) return;
+      error = 'no-audio';
+      try { r.abort(); } catch { /* nada */ }
+      setTimeout(done, 1500);
+    }, 7000);
+
+    const s = {
+      kind: 'dictar',
+      locked: !!test,
+      finish() { finishing = true; try { r.stop(); } catch { /* nada */ } setTimeout(done, 2500); },
+      cancel() { cancelled = true; try { r.abort(); } catch { /* nada */ } done(); },
+    };
+    session = s;
+    try {
+      begin();
     } catch {
       clearTimeout(watchdog);
+      session = null;
       toast('No se ha podido encender el dictado.', recordInstead(), 'Grabar');
       return;
     }
-    session = {
-      stop: () => { r.stop(); setTimeout(() => r.onend(), 2500); },
-      cancel: () => { cancelled = true; r.abort(); setTimeout(() => r.onend(), 800); },
-    };
-    openRec('dictar');
-    el.recTitle.textContent = 'Encendiendo el micrófono…';
+    voiceStarted('dictar');
+    rb.liveText.dataset.placeholder = test ? 'Prueba: di una frase y toca la flecha' : 'Habla: se va escribiendo aquí…';
   }
 
   // Ajustes → «Probar el micrófono»: dice si llega sonido y si el dictado entiende algo
@@ -1128,46 +1260,24 @@
       toast(voiceFail(e && e.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture', false));
       return;
     }
-    let ac;
-    let raf = 0;
-    let max = 0;
+    const m = meter(stream, testWave);
     const t0 = Date.now();
+    let timer = 0;
     const finish = () => {
-      if (!session) return;
-      cancelAnimationFrame(raf);
-      if (ac) ac.close().catch(() => {});
+      if (!session || session.kind !== 'test') return;
+      clearInterval(timer);
+      m.stop();
       stream.getTracks().forEach((t) => t.stop());
       closeRec();
-      toast(max > 0.12 ? 'El micrófono funciona bien.' : 'No llega sonido del micrófono. ¿Lo está usando otra app?');
+      toast(m.max > 0.12 ? 'El micrófono funciona bien.' : 'No llega sonido del micrófono. ¿Lo está usando otra app?');
     };
-    try {
-      ac = new (window.AudioContext || window.webkitAudioContext)();
-      const an = ac.createAnalyser();
-      an.fftSize = 512;
-      ac.createMediaStreamSource(stream).connect(an);
-      const data = new Uint8Array(an.fftSize);
-      const loop = () => {
-        raf = requestAnimationFrame(loop);
-        an.getByteTimeDomainData(data);
-        let sum = 0;
-        for (const v of data) sum += (v - 128) * (v - 128);
-        const lvl = Math.sqrt(sum / data.length) / 28;
-        max = Math.max(max, lvl);
-        pushLevel(lvl);
-        const left = Math.ceil(5 - (Date.now() - t0) / 1000);
-        el.recLive.textContent = left > 0 ? left + ' s' : '';
-        if (left <= 0) finish();
-      };
-      raf = requestAnimationFrame(loop);
-    } catch {
-      stream.getTracks().forEach((t) => t.stop());
-      toast('El micrófono responde, pero no se puede medir el sonido aquí.');
-      return;
-    }
-    session = { stop: finish, cancel: finish };
-    openRec('audio');
-    el.recHint.hidden = true;
-    el.recTitle.textContent = 'Prueba: habla un momento';
+    session = { kind: 'test', locked: true, finish, cancel: finish };
+    openRec();
+    timer = setInterval(() => {
+      const left = Math.ceil(5 - (Date.now() - t0) / 1000);
+      el.recLive.textContent = left > 0 ? left + ' s' : '';
+      if (left <= 0) finish();
+    }, 200);
   }
 
   // ---------- Voz: pasar la grabación a texto en el propio móvil ----------
@@ -1247,116 +1357,92 @@
 
   // ---------- Voz: grabar y pasar a texto ----------
   async function startRecording() {
+    let cancelled = false;
+    let wantFinish = false;
+    const s = {
+      kind: 'audio',
+      locked: false,
+      starting: true, // pidiendo el micrófono (la primera vez, el permiso)
+      finish() { wantFinish = true; },
+      cancel() { cancelled = true; voiceEnded(); },
+    };
+    session = s;
+    voiceStarted('audio');
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     } catch (e) {
+      if (session === s) voiceEnded();
       toast(voiceFail(e && e.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture', false));
       return;
     }
+    if (cancelled || session !== s) { stream.getTracks().forEach((t) => t.stop()); return; }
+
     const type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg']
       .find((t) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
     let mr;
     try { mr = new MediaRecorder(stream, type ? { mimeType: type } : undefined); } catch { mr = new MediaRecorder(stream); }
-
-    // Nivel del micrófono para la onda
-    let ac = null;
-    let raf = 0;
-    try {
-      ac = new (window.AudioContext || window.webkitAudioContext)();
-      const an = ac.createAnalyser();
-      an.fftSize = 512;
-      ac.createMediaStreamSource(stream).connect(an);
-      const data = new Uint8Array(an.fftSize);
-      let last = 0;
-      const loop = (now) => {
-        raf = requestAnimationFrame(loop);
-        if (now - last < 55) return;
-        last = now;
-        an.getByteTimeDomainData(data);
-        let sum = 0;
-        for (const v of data) sum += (v - 128) * (v - 128);
-        pushLevel(Math.sqrt(sum / data.length) / 28);
-      };
-      raf = requestAnimationFrame(loop);
-    } catch { el.wave.classList.add('idle'); }
-
+    const m = meter(stream, dockWave);
     const chunks = [];
-    const t0 = Date.now();
-    let cancelled = false;
-    const tick = () => {
-      const sec = (Date.now() - t0) / 1000;
-      el.recLive.textContent = fmtDur(sec);
-      if (sec >= MAX_REC && mr.state === 'recording') mr.stop();
-    };
-    const timer = setInterval(tick, 250);
+    let recStart = 0;
 
     mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
     mr.onstop = async () => {
-      clearInterval(timer);
-      cancelAnimationFrame(raf);
-      if (ac) ac.close().catch(() => {});
+      const dur = Math.round((Date.now() - recStart) / 1000);
+      m.stop();
       stream.getTracks().forEach((t) => t.stop());
-      if (cancelled || !chunks.length) { closeRec(); return; }
-      const dur = Math.round((Date.now() - t0) / 1000);
-      if (dur < 1) { closeRec(); toast('Demasiado corta. Graba un poco más.'); return; }
+      if (cancelled || !chunks.length) { if (session === s) voiceEnded(); return; }
+      if (dur < 1) { voiceEnded(); toast('Demasiado corta. Mantén pulsado mientras hablas.'); return; }
       const blob = new Blob(chunks, { type: mr.mimeType || type || 'audio/webm' });
 
       if (STT_OK) {
         const text = await transcribeBlob(blob);
-        if (text === null) return; // cancelado mientras se pasaba a texto
-        if (text === '') { closeRec(); return; } // no se dijo nada que entender
-        if (text) {
-          closeRec();
-          addMany(text.split(SPLIT).map((s) => s.trim()).filter(Boolean));
-          return;
-        }
+        if (text === null) return; // descartada mientras se pasaba a texto
+        voiceEnded();
+        if (text) addMany(text.split(SPLIT).map((x) => x.trim()).filter(Boolean));
+        if (text !== false) return;
         // false: falló el reconocimiento → se guarda el audio para no perder la tarea
+      } else {
+        voiceEnded();
       }
-      closeRec();
       await saveAudioNote(blob, dur);
     };
 
+    s.starting = false;
+    s.finish = () => { if (mr.state !== 'inactive') mr.stop(); };
+    s.cancel = () => { cancelled = true; if (mr.state !== 'inactive') mr.stop(); voiceEnded(); };
     mr.start(1000);
-    session = { stop: () => mr.state !== 'inactive' && mr.stop(), cancel: () => { cancelled = true; if (mr.state !== 'inactive') mr.stop(); } };
-    openRec('audio');
-    tick();
+    recStart = voiceT0 = Date.now(); // el tiempo cuenta desde que graba de verdad
     stt.warm(); // empieza a cargar el reconocimiento mientras hablas
+    if (wantFinish) s.finish();
   }
 
-  // Muestra «Pasando a texto…» (y la descarga, la primera vez). Devuelve el texto, '' si no se entendió nada,
-  // null si se canceló y false si el reconocimiento falló
+  // «Pasando a texto…» en la barra (y la descarga, la primera vez). Devuelve el texto, '' si no se entendió
+  // nada, null si se descartó y false si el reconocimiento falló
   async function transcribeBlob(blob) {
     let cancelled = false;
-    session = { stop: () => {}, cancel: () => { cancelled = true; closeRec(); } };
-    el.rec.dataset.mode = 'busy';
-    el.recTitle.textContent = 'Pasando a texto…';
-    el.recLive.textContent = '';
-    el.recLive.dataset.placeholder = 'Un momento';
-    el.recHint.hidden = false;
-    el.recHint.textContent = stt.ready || prefs.get('sttReady', false) ? 'Se hace en el propio móvil, sin internet.' : 'Preparando el reconocimiento de voz…';
-    stt.progress((pct) => {
-      if (pct < 100) el.recHint.textContent = 'Descargando el reconocimiento de voz (solo la primera vez): ' + pct + ' %';
-      else el.recHint.textContent = 'Se hace en el propio móvil, sin internet.';
-    });
-    el.wave.classList.add('idle');
+    session = { kind: 'busy', locked: true, finish() {}, cancel() { cancelled = true; voiceEnded(); } };
+    clearInterval(voiceTimer);
+    rb.live.hidden = true;
+    dockState('busy');
+    const idle = 'Pasando a texto…';
+    rb.busy.textContent = stt.ready || prefs.get('sttReady', false) ? idle : 'Preparando la voz…';
+    stt.progress((pct) => { rb.busy.textContent = pct < 100 ? 'Preparando la voz (solo la 1.ª vez): ' + pct + ' %' : idle; });
     try {
       const pcm = await toPcm16k(blob);
       const raw = await stt.transcribe(pcm);
       if (cancelled) return null;
       const text = cleanTranscript(raw);
       if (!text) toast('No he entendido nada en la grabación. Prueba a hablar más cerca.');
-      return text || (cancelled ? null : '');
+      return text;
     } catch {
       if (cancelled) return null;
-      closeRec();
       toast(navigator.onLine === false && !prefs.get('sttReady', false)
         ? 'Sin internet no puedo descargar el reconocimiento la primera vez: la guardo como audio.'
         : 'No he podido pasarlo a texto: la guardo como audio.');
       return false;
     } finally {
       stt.progress(null);
-      el.recHint.innerHTML = 'Di <b>«nueva tarea»</b> para separar varias · <b>«mañana»</b>, <b>«importante»</b> o <b>«todos los días»</b> al final';
     }
   }
 
@@ -1372,21 +1458,66 @@
     if (el.toast.hidden) toast('Nota guardada · tócala para ponerle nombre', async () => { await removeQuiet(id); render(); });
   }
 
-  function startVoice() {
-    if (session) { session.stop(); return; }
-    stopPlayback();
-    if (voiceMode === 'dictar') startDictation();
-    else if (voiceMode === 'audio') startRecording();
-  }
+  // ---------- Gestos del botón del micrófono ----------
+  el.action.addEventListener('pointerdown', (e) => {
+    if (el.input.value.trim() || !voiceMode) return; // con texto escrito, el botón apunta (click)
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    if (session) {
+      if (session.locked && session.kind !== 'busy' && session.kind !== 'test') press = { send: true };
+      return;
+    }
+    try { el.action.setPointerCapture(e.pointerId); } catch { /* nada */ }
+    press = { id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: Date.now(), dx: 0, dy: 0 };
+    vibrate(10);
+    startVoice();
+  });
 
-  function openRec(mode) {
-    el.rec.dataset.mode = mode;
-    el.recTitle.textContent = mode === 'dictar' ? 'Te escucho' : 'Grabando · toca para terminar';
+  el.action.addEventListener('pointermove', (e) => {
+    if (!press || press.send || e.pointerId !== press.id || !session || session.locked) return;
+    let dx = Math.min(0, e.clientX - press.x0);
+    let dy = Math.min(0, e.clientY - press.y0);
+    if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; // en un solo sentido, como en WhatsApp
+    press.dx = dx;
+    press.dy = dy;
+    el.action.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+    el.composer.style.setProperty('--slide', String(Math.min(1, -dx / 120)));
+    el.composer.style.setProperty('--lift', String(Math.min(1, -dy / 80)));
+    if (-dy > 80) lockVoice();
+    else if (-dx > 120) { vibrate(20); session.cancel(); }
+  });
+
+  const release = (e) => {
+    if (!press) return;
+    const p = press;
+    press = null;
+    if (p.send) { if (session) session.finish(); return; }
+    if (e.pointerId !== p.id) return;
+    resetActionPos();
+    if (!session || session.locked) return;
+    const tap = Date.now() - p.t0 < 350 && p.dx > -10 && p.dy > -10;
+    // Un toque corto, o soltar mientras aún pide el micrófono, deja la grabación bloqueada (manos libres)
+    if (tap || session.starting || e.type === 'pointercancel') lockVoice();
+    else session.finish();
+  };
+  el.action.addEventListener('pointerup', release);
+  el.action.addEventListener('pointercancel', release);
+  el.action.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  el.action.addEventListener('click', (e) => {
+    if (el.input.value.trim()) { submitText(); return; }
+    // Con teclado (Intro o espacio) no se puede mantener pulsado: empieza bloqueada y el segundo toque apunta
+    if (e.detail === 0) { if (session) session.finish(); else startVoice(true); }
+  });
+  $('#rbTrash').addEventListener('click', () => { if (session) session.cancel(); });
+
+  // Ventana de «Probar el micrófono»
+  function openRec() {
+    el.rec.dataset.mode = 'audio';
+    el.recTitle.textContent = 'Prueba: habla un momento';
     el.recLive.textContent = '';
-    el.recLive.dataset.placeholder = mode === 'dictar' ? 'Di lo que tengas pendiente…' : '0:00';
-    el.recHint.hidden = false; // «mañana», «importante»… valen también al grabar
-    resetWave();
-    el.wave.classList.toggle('idle', mode === 'dictar');
+    el.recHint.hidden = true;
+    testWave.reset();
     el.input.blur();
     el.rec.hidden = false;
     $('#recStop').focus();
@@ -1394,7 +1525,6 @@
 
   function closeRec() {
     el.rec.hidden = true;
-    el.wave.classList.remove('idle', 'talk');
     session = null;
   }
 
@@ -1728,12 +1858,11 @@
   el.composer.addEventListener('submit', (e) => {
     e.preventDefault();
     if (el.input.value.trim()) submitText();
-    else startVoice();
   });
 
-  $('#recStop').addEventListener('click', () => session && session.stop());
+  $('#recStop').addEventListener('click', () => session && session.finish());
   $('#recCancel').addEventListener('click', () => { if (session) session.cancel(); else closeRec(); });
-  el.rec.addEventListener('click', (e) => { if (e.target === el.rec && session) session.stop(); });
+  el.rec.addEventListener('click', (e) => { if (e.target === el.rec && session) session.finish(); });
 
   for (const b of $$('[data-filter]', el.seg)) {
     b.addEventListener('click', () => {
@@ -1817,7 +1946,7 @@
   // Al volver a la app (o al cambiar de día) se repinta: lo de mañana pasa a hoy
   let shownDay = today0();
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { if (session) session.stop(); stopPlayback(); return; }
+    if (document.hidden) { if (session) session.finish(); stopPlayback(); return; }
     render();
     shownDay = today0();
   });

@@ -5,8 +5,12 @@ Funciona sin conexión y se instala como una app. Todo se guarda **solo en el m�
 
 ## Cómo se usa
 
-- **Apuntar**: escribe y pulsa la flecha, o toca el micrófono y dilo. Si escribes varias líneas, cada línea es una tarea;
-  al dictar, di **«nueva tarea»** para separarlas. Se apuntan como en una libreta: la nueva, al final.
+- **Apuntar**: escribe y pulsa la flecha, o usa el micrófono. Si escribes varias líneas, cada línea es una tarea;
+  al hablar, di **«nueva tarea»** para separarlas. Se apuntan como en una libreta: la nueva, al final.
+- **Micrófono, como las notas de voz de WhatsApp**: **mantén pulsado** mientras hablas y **suelta** para apuntar.
+  Desliza **a la izquierda** para descartar o **hacia arriba** (al candado) para dejarlo grabando sin el dedo; luego
+  toca la flecha para apuntar o la papelera para descartar. Un **toque corto** también lo deja abierto hasta el
+  siguiente toque. No se corta aunque te quedes callado un momento.
 - **Tachar**: toca el círculo o desliza la tarea **a la derecha**. Lo tachado hoy se queda abajo, con la raya,
   hasta mañana (como en el papel). El anillo de arriba cuenta cuántas llevas tachadas de las del día.
 - **Deslizar a la izquierda**: aparecen **Mañana** (la pasa al día siguiente) y **Borrar**. Si deslizas hasta el final,
