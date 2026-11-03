@@ -123,6 +123,7 @@
   let session = null;      // dictado o grabación en curso
   let editing = null;
   let editDue = null;
+  let editDiscard = false; // «Cancelar» en la ficha: no se guarda al cerrarla
   const fresh = new Set(); // ids recién creados (animación de entrada)
   let installPrompt = null;
   let lastGesture = 0;
@@ -286,7 +287,54 @@
   }
 
   // ---------- Pintar ----------
+  // ---------- Lista fluida: las tareas se desplazan a su nuevo sitio en vez de saltar ----------
+  let flipNext = false;
+  const renderFlip = () => { flipNext = true; render(); };
+
+  function snapshot() {
+    const m = new Map();
+    for (const n of el.sections.querySelectorAll('[data-key], .row')) {
+      m.set(n.classList.contains('row') ? 'r:' + n.dataset.id : n.dataset.key, n.getBoundingClientRect());
+    }
+    return m;
+  }
+
+  function flipPlay(before) {
+    if (REDUCED || !before.size) return;
+    const opts = { duration: 440, easing: 'cubic-bezier(.32,.72,0,1)' };
+    const shift = new Map(); // cuánto se mueve cada grupo, para descontarlo a sus filas
+    for (const n of el.sections.querySelectorAll('[data-key]')) {
+      const b = before.get(n.dataset.key);
+      if (!b) continue;
+      const a = n.getBoundingClientRect();
+      const dy = b.top - a.top;
+      if (n.tagName === 'UL') {
+        shift.set(n, dy);
+        if (Math.abs(dy) > 0.5 || Math.abs(b.height - a.height) > 0.5) {
+          n.animate([{ transform: 'translateY(' + dy + 'px)', height: b.height + 'px' }, { transform: 'none', height: a.height + 'px' }], opts);
+        }
+      } else if (Math.abs(dy) > 0.5) {
+        n.animate([{ transform: 'translateY(' + dy + 'px)' }, { transform: 'none' }], opts);
+      }
+    }
+    for (const li of el.sections.querySelectorAll('.row')) {
+      const b = before.get('r:' + li.dataset.id);
+      if (!b) continue;
+      const a = li.getBoundingClientRect();
+      const dy = b.top - a.top - (shift.get(li.parentElement) || 0);
+      if (Math.abs(dy) < 0.5) continue;
+      // La que cambia de grupo viaja por encima, como una tarjeta que se lleva con el dedo
+      const far = Math.abs(dy) > a.height * 1.5;
+      const ul = li.parentElement;
+      if (far) { li.classList.add('is-flying'); ul.classList.add('is-landing'); }
+      const anim = li.animate([{ transform: 'translateY(' + dy + 'px)' }, { transform: 'none' }], opts);
+      if (far) anim.onfinish = anim.oncancel = () => { li.classList.remove('is-flying'); ul.classList.remove('is-landing'); };
+    }
+  }
+
   function render() {
+    const snap = flipNext ? snapshot() : null;
+    flipNext = false;
     const today = today0();
     const pend = tasks.filter(isToday);
     const future = tasks.filter(isFuture);
@@ -368,6 +416,7 @@
       const ul = document.createElement('ul');
       ul.className = 'group glass' + (g.quiet ? ' is-quiet' : '');
       ul.dataset.kind = g.kind;
+      ul.dataset.key = 'g:' + (g.title || g.kind);
       if (g.drag && !query) ul.dataset.drag = '1';
       ul.append(...g.items.map((t) => row(t, g.kind)));
       frag.append(ul);
@@ -389,6 +438,7 @@
       empty = [ICON.tray, 'Nada tachado aún', 'Toca el círculo de una tarea o deslízala a la derecha cuando la acabes.'];
     }
     el.empty.hidden = !empty;
+    $('#examples').hidden = !(empty && !tasks.length && !query);
     if (empty) {
       el.emptyIc.innerHTML = empty[0];
       el.emptyIc.classList.toggle('is-ok', !!empty[3]);
@@ -399,11 +449,13 @@
     el.tip.hidden = !(!query && filter === 'todo' && pend.length > 1 && !prefs.get('tipSwipe', false));
     el.clearDone.hidden = !(!query && filter === 'done' && done.length > 1);
     el.seg.hidden = !!query;
+    if (snap) flipPlay(snap); // al final: lo de arriba (vacío, consejo) también mueve la lista
   }
 
   function groupHead(g, open) {
     const h = document.createElement(g.fold ? 'button' : 'h2');
     h.className = 'group-h';
+    h.dataset.key = 'h:' + g.title;
     if (g.fold) {
       h.type = 'button';
       h.dataset.fold = g.fold;
@@ -566,8 +618,16 @@
   // ---------- Acciones sobre tareas ----------
   const maxOrder = () => tasks.reduce((m, t) => Math.max(m, t.order ?? t.created), 0);
 
-  async function addMany(raws) {
+  async function addMany(raws, extra) {
     const parsed = raws.map(parseQuick);
+    // lo marcado con los botones de encima de la barra vale para todas las líneas
+    if (extra) {
+      for (const p of parsed) {
+        if (extra.tomorrow && !p.due) p.due = addDays(today0(), 1);
+        if (extra.star) p.star = true;
+        if (extra.tag && !tagsOf(p).includes(extra.tag)) p.text += ' ' + extra.tag;
+      }
+    }
     let order = maxOrder();
     const now = Date.now();
     const added = parsed.map((p, i) => ({
@@ -594,7 +654,7 @@
     }
     toast(msg, async () => {
       for (const t of added) await removeQuiet(t.id);
-      render();
+      renderFlip();
     });
   }
 
@@ -609,12 +669,13 @@
     if (player.id === t.id) stopPlayback();
     await removeQuiet(t.id);
     vibrate(10);
-    render();
+    renderFlip();
     toast('Borrada', async () => {
       tasks.push(t);
+      fresh.add(t.id);
       await db.put(t);
       if (audio) await db.putAudio(t.id, audio);
-      render();
+      renderFlip();
     });
   }
 
@@ -662,19 +723,27 @@
     }
     await db.put(t);
     if (value) vibrate(12);
-    render();
+    renderFlip();
 
     const left = tasks.filter(isToday).length;
     let msg = value ? 'Tachada' : 'Vuelve a por hacer';
     if (value && clone) msg = 'Tachada · vuelve ' + whenWords(clone.due);
-    if (value && !left) msg = '¡Todo tachado por hoy!';
+    if (value && !left) { msg = '¡Todo tachado por hoy!'; celebrate(); }
     toast(msg, async () => {
       Object.assign(t, prev);
       if (clone) await removeQuiet(clone.id);
       if (removed) { tasks.push(removed); await db.put(removed); }
       await db.put(t);
-      render();
+      renderFlip();
     });
+  }
+
+  // Al tachar la última del día: el anillo se llena con un destello y el móvil vibra
+  function celebrate() {
+    vibrate([18, 60, 18, 60, 30]);
+    el.ring.classList.remove('is-party');
+    void el.ring.offsetWidth;
+    el.ring.classList.add('is-party');
   }
 
   async function postpone(t) {
@@ -682,8 +751,8 @@
     const toToday = isFuture(t);
     t.due = toToday ? null : addDays(today0(), 1);
     await db.put(t);
-    render();
-    toast(toToday ? 'Pasada a hoy' : 'Pasada a mañana', async () => { t.due = prev; await db.put(t); render(); });
+    renderFlip();
+    toast(toToday ? 'Pasada a hoy' : 'Pasada a mañana', async () => { t.due = prev; await db.put(t); renderFlip(); });
   }
 
   // Recoge la fila con una animación antes de volver a pintar la lista
@@ -698,17 +767,16 @@
   }
 
   async function tapCheck(t, li) {
-    li.classList.toggle('is-done', !t.done); // la raya cruza el texto
+    li.classList.toggle('is-done', !t.done); // la raya cruza el texto…
     vibrate(8);
-    await wait(520);
-    await collapse(li);
-    setDone(t, !t.done);
+    await wait(480);
+    setDone(t, !t.done); // …y la tarea baja a «Tachadas hoy»
   }
 
   async function toggleStar(t) {
     t.star = !t.star;
     await db.put(t);
-    render();
+    renderFlip();
   }
 
   async function clearDone() {
@@ -749,6 +817,7 @@
     if (!openRow) return;
     settle(openRow, 0);
     openRow = null;
+    backDone('row');
   }
 
   document.addEventListener('pointerdown', (e) => {
@@ -832,6 +901,7 @@
       // se queda abierta mostrando «Mañana» y «Borrar»
       const n = $$('.act-l button', s.li).length;
       openRow = s.li;
+      backPush('row', closeOpen);
       s.li.classList.add('is-open');
       s.li.classList.remove('is-armed');
       settle(s.li, -78 * n);
@@ -928,6 +998,7 @@
     if (!t) return;
     if (e.target.closest('.act-l')) {
       openRow = null;
+      backDone('row');
       if (e.target.closest('.b-del')) collapse(li).then(() => removeTask(t));
       else if (e.target.closest('.b-later')) collapse(li).then(() => postpone(t));
       return;
@@ -961,22 +1032,61 @@
     syncHint();
   }
 
-  // Muestra encima de la barra lo que se ha entendido («Mañana», «Importante»…)
+  // Encima de la barra, mientras escribes: botones para marcar Mañana, Importante o una etiqueta sin saberse las
+  // palabras clave. Si las escribes («mañana», «importante», #casa), el botón se enciende solo.
+  const mods = { tomorrow: false, star: false, tag: null };
+  let typing = false;
+
+  function topTags(n) {
+    const count = new Map();
+    for (const t of tasks) for (const tag of tagsOf(t)) count.set(tag, (count.get(tag) || 0) + (t.done ? 1 : 3));
+    return [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([tag]) => tag);
+  }
+
   function syncHint() {
     const lines = el.input.value.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+    const show = (el.composer.dataset.state || 'idle') === 'idle' && (typing || lines.length > 0);
+    el.hint.hidden = !show;
+    if (!show) return;
+    const p = lines.length === 1 ? parseQuick(lines[0]) : { due: null, star: false, repeat: null };
+    const typedTags = [...new Set(lines.flatMap((l) => tagsOf({ text: l })))];
     const chips = [];
-    if (lines.length > 1) chips.push(['var(--indigo)', ICON.list, lines.length + ' tareas']);
-    if (lines.length === 1) {
-      const p = parseQuick(lines[0]);
-      if (p.due) chips.push(['var(--red)', ICON.cal, futureLabel(p.due)]);
-      if (p.star) chips.push(['var(--orange)', ICON.star.replace('<path', '<path class="fill"'), 'Importante']);
-      if (p.repeat) chips.push(['var(--indigo)', ICON.repeat, REPEAT[p.repeat]]);
-      for (const tag of tagsOf(p)) chips.push([tagColor(tag), '', tag]);
+    if (lines.length > 1) chips.push({ c: 'var(--indigo)', ic: ICON.list, label: lines.length + ' tareas', on: true, fixed: true });
+    chips.push({ act: 'tomorrow', c: 'var(--red)', ic: ICON.later, label: p.due ? futureLabel(p.due) : 'Mañana', on: !!p.due || mods.tomorrow, fixed: !!p.due });
+    chips.push({ act: 'star', c: 'var(--orange)', ic: ICON.star.replace('<path', '<path class="fill"'), label: 'Importante', on: p.star || mods.star, fixed: p.star });
+    if (p.repeat) chips.push({ c: 'var(--indigo)', ic: ICON.repeat, label: REPEAT[p.repeat], on: true, fixed: true });
+    const tags = [...new Set([...typedTags, ...(mods.tag ? [mods.tag] : []), ...topTags(4)])].slice(0, 6);
+    for (const tag of tags) {
+      chips.push({ act: 'tag', tag, c: tagColor(tag), ic: '', label: tag, on: typedTags.includes(tag) || mods.tag === tag, fixed: typedTags.includes(tag) });
     }
-    el.hint.hidden = !chips.length;
-    el.hint.innerHTML = chips.map(([c, ic, label]) => '<span style="--c:' + c + '">' + ic + '</span>').join('');
-    $$('span', el.hint).forEach((s, i) => s.append(chips[i][2]));
+    el.hint.replaceChildren(...chips.map((x) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mod' + (x.on ? ' is-on' : '');
+      b.style.setProperty('--c', x.c);
+      if (x.act) b.dataset.act = x.act;
+      if (x.tag) b.dataset.tag = x.tag;
+      if (x.fixed) b.dataset.fixed = '1';
+      b.setAttribute('aria-pressed', String(!!x.on));
+      b.innerHTML = x.ic;
+      b.append(x.label);
+      return b;
+    }));
   }
+
+  // Los botones no le quitan el foco al campo de texto: el teclado no se cierra al tocarlos
+  el.hint.addEventListener('pointerdown', (e) => { if (e.target.closest('.mod')) e.preventDefault(); });
+  el.hint.addEventListener('click', (e) => {
+    const b = e.target.closest('.mod');
+    if (!b || !b.dataset.act || b.dataset.fixed) return;
+    if (b.dataset.act === 'tomorrow') mods.tomorrow = !mods.tomorrow;
+    else if (b.dataset.act === 'star') mods.star = !mods.star;
+    else if (b.dataset.act === 'tag') mods.tag = mods.tag === b.dataset.tag ? null : b.dataset.tag;
+    vibrate(6);
+    syncHint();
+  });
+  el.input.addEventListener('focus', () => { typing = true; syncHint(); });
+  el.input.addEventListener('blur', () => { setTimeout(() => { typing = document.activeElement === el.input; syncHint(); }, 120); });
 
   function autosize() {
     el.input.style.height = 'auto';
@@ -986,10 +1096,14 @@
   function submitText() {
     const lines = el.input.value.split(/\n+/).map((s) => s.trim()).filter(Boolean);
     if (!lines.length) return;
+    const extra = { ...mods };
+    mods.tomorrow = false;
+    mods.star = false;
+    mods.tag = null;
     el.input.value = '';
     autosize();
     syncAction();
-    addMany(lines);
+    addMany(lines, extra);
   }
 
   // ---------- Onda de la voz ----------
@@ -1111,10 +1225,12 @@
     rb.live.hidden = kind !== 'dictar';
     rb.liveText.textContent = '';
     dockState(session && session.locked ? 'locked' : 'hold');
+    backPush('voice', () => { if (session) session.cancel(); });
   }
 
   function voiceEnded() {
     clearInterval(voiceTimer);
+    backDone('voice');
     session = null;
     press = null;
     resetActionPos();
@@ -1521,10 +1637,12 @@
     el.input.blur();
     el.rec.hidden = false;
     $('#recStop').focus();
+    backPush('test', () => { if (session) session.cancel(); });
   }
 
   function closeRec() {
     el.rec.hidden = true;
+    backDone('test');
     session = null;
   }
 
@@ -1581,7 +1699,40 @@
   }
   function hideToast() { el.toast.hidden = true; undoFn = null; }
 
-  // ---------- Hojas (se cierran tocando fuera, con Esc o arrastrando hacia abajo) ----------
+  // ---------- Botón «Atrás» del móvil: cierra lo que esté abierto en vez de salir de la app ----------
+  const backStack = [];
+  const backQueue = [];
+  let backSkip = 0;
+
+  function backPush(name, close) {
+    if (backStack.some((b) => b.name === name)) return;
+    backStack.push({ name, close });
+    // si aún se está deshaciendo un «atrás» anterior, se espera a que termine para no pisarlo
+    if (backSkip) backQueue.push(name);
+    else try { history.pushState({ lz: name }, ''); } catch { /* nada */ }
+  }
+
+  function backDone(name) {
+    const i = backStack.findIndex((b) => b.name === name);
+    if (i < 0) return; // ya lo cerró el propio botón «Atrás»
+    backStack.splice(i, 1);
+    const q = backQueue.indexOf(name);
+    if (q >= 0) { backQueue.splice(q, 1); return; }
+    backSkip++;
+    history.back();
+  }
+
+  window.addEventListener('popstate', () => {
+    if (backSkip) {
+      backSkip--;
+      if (!backSkip) while (backQueue.length) history.pushState({ lz: backQueue.shift() }, '');
+      return;
+    }
+    const top = backStack.pop();
+    if (top) top.close();
+  });
+
+  // ---------- Hojas (se cierran tocando fuera, con Esc, arrastrando hacia abajo o con «Atrás») ----------
   function openSheet(d) {
     d.classList.remove('is-closing');
     d.style.transform = '';
@@ -1589,6 +1740,7 @@
     d.showModal();
     body.scrollTop = 0;
     $('.sheet-top', d).classList.remove('is-scrolled');
+    backPush('sheet:' + d.id, () => closeSheet(d));
   }
 
   function closeSheet(d) {
@@ -1600,6 +1752,7 @@
 
   function bindSheet(d) {
     d.addEventListener('cancel', (e) => { e.preventDefault(); closeSheet(d); });
+    d.addEventListener('close', () => backDone('sheet:' + d.id));
     d.addEventListener('click', (e) => {
       if (e.target === d || e.target.closest('[data-close]')) closeSheet(d);
     });
@@ -1683,30 +1836,38 @@
     if (t.audio && t.text === 'Nota de voz') el.editText.select();
   }
 
+  // Se llama al cerrarse la ficha: solo escribe (y avisa) si de verdad ha cambiado algo
   async function saveEdit() {
     const t = editing;
     if (!t) return;
     const text = el.editText.value.trim();
-    closeSheet(el.edit);
     if (!text && !t.audio) { removeTask(t); return; }
-    t.text = text || 'Nota de voz';
-    t.note = el.editNote.value.trim();
-    t.star = el.editStar.checked;
-    if (!t.done) t.due = editDue;
-    t.repeat = el.editRepeat.value || null;
+    const next = {
+      text: text || 'Nota de voz',
+      note: el.editNote.value.trim(),
+      star: el.editStar.checked,
+      due: t.done ? t.due : editDue,
+      repeat: el.editRepeat.value || null,
+    };
+    const prev = { text: t.text, note: t.note || '', star: !!t.star, due: t.due || null, repeat: t.repeat || null };
+    if (Object.keys(next).every((k) => (next[k] || null) === (prev[k] || null))) return;
+    Object.assign(t, next);
     await db.put(t);
-    render();
+    renderFlip();
+    toast('Guardada', async () => { Object.assign(t, prev); await db.put(t); renderFlip(); });
   }
 
   // ---------- Buscar ----------
   function openSearch() {
     el.searchBar.hidden = false;
     el.search.focus();
+    backPush('search', closeSearch);
   }
   function closeSearch() {
     query = '';
     el.search.value = '';
     el.searchBar.hidden = true;
+    backDone('search');
     render();
   }
 
@@ -1886,9 +2047,28 @@
   });
 
   for (const d of [el.edit, el.menu, el.installSheet]) bindSheet(d);
-  el.editForm.addEventListener('submit', (e) => { e.preventDefault(); saveEdit(); });
-  $('#editDelete').addEventListener('click', () => { const t = editing; closeSheet(el.edit); if (t) removeTask(t); });
-  el.edit.addEventListener('close', () => { editing = null; });
+  // Ejemplos de la libreta vacía: rellenan la barra para ver cómo se entienden antes de apuntarlos
+  $('#examples').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    el.input.value = b.textContent;
+    el.input.focus();
+    autosize();
+    syncAction();
+  });
+
+  // Tocar el título pequeño de arriba vuelve al principio de la lista, como en iPhone
+  $('.nav-title').addEventListener('click', () => window.scrollTo({ top: 0, behavior: REDUCED ? 'auto' : 'smooth' }));
+
+  // La ficha guarda sola al cerrarla (Listo, tocar fuera, deslizar hacia abajo o «Atrás»); solo «Cancelar» descarta
+  el.editForm.addEventListener('submit', (e) => { e.preventDefault(); closeSheet(el.edit); });
+  $('#edit [data-close]').addEventListener('click', () => { editDiscard = true; }, true);
+  $('#editDelete').addEventListener('click', () => { const t = editing; editDiscard = true; closeSheet(el.edit); if (t) removeTask(t); });
+  el.edit.addEventListener('close', () => {
+    if (editing && !editDiscard) saveEdit();
+    editing = null;
+    editDiscard = false;
+  });
   el.editText.addEventListener('input', syncQuick);
   el.editNote.addEventListener('input', syncQuick);
   el.dueChips.addEventListener('click', (e) => {

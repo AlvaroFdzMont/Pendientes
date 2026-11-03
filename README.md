@@ -16,7 +16,10 @@ Funciona sin conexión y se instala como una app. Todo se guarda **solo en el m�
 - **Deslizar a la izquierda**: aparecen **Mañana** (la pasa al día siguiente) y **Borrar**. Si deslizas hasta el final,
   se borra.
 - **Mover**: mantén pulsada una tarea y arrástrala para ordenarlas a tu gusto.
-- **Editar**: toca el texto. Puedes cambiarlo, añadir **notas**, elegir **para cuándo** (hoy, mañana u otro día),
+- **Mientras escribes**, encima de la barra salen **Mañana**, **Importante** y tus **#etiquetas** más usadas: tócalos
+  para marcarlos sin escribir nada más (si escribes «mañana» o «importante», se encienden solos).
+- El botón **Atrás** del móvil cierra lo que tengas abierto (una ficha, el buscador, una grabación) antes de salir.
+- **Editar**: toca el texto. La ficha guarda sola al cerrarla; solo «Cancelar» descarta los cambios. Puedes cambiarlo, añadir **notas**, elegir **para cuándo** (hoy, mañana u otro día),
   **repetir** (cada día, entre semana, cada semana, cada mes) y marcarla como **importante**.
 - **Buscar**: la lupa de arriba busca en todo, también en lo ya tachado.
 - Todo tiene **Deshacer** durante unos segundos.

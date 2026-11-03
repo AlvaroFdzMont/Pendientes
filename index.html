@@ -10,11 +10,11 @@
 <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <link rel="manifest" id="manifest" href="manifest.webmanifest">
 <script>
-  // Android pinta las barras del sistema (hora arriba, botones abajo) con el color del manifiesto:
-  // en modo oscuro se usa el oscuro para que no salgan franjas claras.
+  // Android pinta las barras del sistema (hora arriba, botones abajo) con el color del manifiesto y lo guarda
+  // al instalar. Por defecto es el oscuro; solo con el móvil en modo claro se usa el claro.
   (function () {
-    var m = window.matchMedia('(prefers-color-scheme: dark)');
-    var set = function () { document.getElementById('manifest').href = m.matches ? 'manifest-dark.webmanifest' : 'manifest.webmanifest'; };
+    var m = window.matchMedia('(prefers-color-scheme: light)');
+    var set = function () { document.getElementById('manifest').href = m.matches ? 'manifest-light.webmanifest' : 'manifest.webmanifest'; };
     set();
     if (m.addEventListener) m.addEventListener('change', set);
   })();
@@ -99,6 +99,13 @@
     <div class="empty-ic glass" id="emptyIc"></div>
     <h2 id="emptyTitle"></h2>
     <p id="emptyText"></p>
+    <div class="examples" id="examples" hidden>
+      <span class="examples-k">Prueba con uno:</span>
+      <button type="button">Comprar pan mañana</button>
+      <button type="button">Llamar al dentista importante</button>
+      <button type="button">Tomar la vitamina todos los días</button>
+      <button type="button">Enviar la factura #trabajo</button>
+    </div>
   </div>
 
   <div id="sections" aria-live="polite"></div>

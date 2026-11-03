@@ -1,6 +1,7 @@
-// Funciona sin conexión: sirve la app desde la caché y la actualiza por detrás.
+// Funciona sin conexión. Con internet se usa siempre la versión más nueva de la app (así las actualizaciones y los
+// colores al instalar llegan a la primera); sin conexión, o si la red tarda, la copia guardada.
 // Si cambias un archivo y quieres forzar la actualización, sube el número de versión.
-const CACHE = 'pendientes-v7';
+const CACHE = 'pendientes-v9';
 // Tipografía y motor del reconocimiento de voz (de otros servidores): se guardan la primera vez
 const EXT = 'pendientes-externos';
 const ASSETS = [
@@ -10,6 +11,7 @@ const ASSETS = [
   'app.js',
   'stt-worker.js',
   'manifest.webmanifest',
+  'manifest-light.webmanifest',
   'manifest-dark.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
@@ -17,6 +19,7 @@ const ASSETS = [
   'icons/apple-touch-icon.png',
 ];
 const EXT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net'];
+const NET_WAIT = 4000; // ms que se espera a la red antes de tirar de la copia guardada
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -52,17 +55,20 @@ self.addEventListener('fetch', (e) => {
 
   if (url.origin !== location.origin) return;
 
+  const key = req.mode === 'navigate' ? 'index.html' : req;
+  const network = fetch(req, { cache: 'no-cache' });
+  // La copia guardada se renueva con lo que llegue de la red, aunque llegue tarde
+  e.waitUntil(network.then(async (res) => {
+    if (res.ok) await (await caches.open(CACHE)).put(key, res.clone());
+  }).catch(() => {}));
+
   e.respondWith((async () => {
-    const cache = await caches.open(CACHE);
-    const key = req.mode === 'navigate' ? 'index.html' : req;
-    const cached = await cache.match(key, { ignoreSearch: true });
-    const network = fetch(req)
-      .then((res) => {
-        if (res.ok) return cache.put(key, res.clone()).then(() => res);
-        return res;
-      })
-      .catch(() => cached);
-    e.waitUntil(network.catch(() => {}));
-    return cached || network;
+    const timeout = new Promise((resolve) => setTimeout(resolve, NET_WAIT));
+    try {
+      const res = await Promise.race([network, timeout]);
+      if (res) return res.clone();
+    } catch { /* sin conexión */ }
+    const cached = await (await caches.open(CACHE)).match(key, { ignoreSearch: true });
+    return cached || network.then((r) => r.clone());
   })());
 });
